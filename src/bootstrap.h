@@ -3,6 +3,10 @@
 #ifndef __BOOTSTRAP_H
 #define __BOOTSTRAP_H
 
+// Required for __u32 , __u64 etc.
+#include <linux/types.h>
+#include <asm/types.h>
+
 #define TASK_COMM_LEN 16
 #define MAX_FILENAME_LEN 127
 
@@ -14,6 +18,22 @@ struct event {
 	char comm[TASK_COMM_LEN];
 	char filename[MAX_FILENAME_LEN];
 	bool exit_event;
+};
+
+// Enumeration for op_type value in dlp_event  
+enum dlp_op_type {
+	DLP_OP_OPEN = 1,
+	DLP_OP_WRITE = 2,
+	DLP_OP_CLOSE = 3
+};
+
+// Data type used to transfer information to user-space
+struct dlp_event {
+	__u32 pid;
+	__u32 uid;
+	char comm[TASK_COMM_LEN];
+	char filename[MAX_FILENAME_LEN];
+	__u32 op_type;
 };
 
 #endif /* __BOOTSTRAP_H */
