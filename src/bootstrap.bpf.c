@@ -23,7 +23,7 @@ struct {
 const volatile unsigned long long min_duration_ns = 0;
 
 SEC("tracepoint/syscalls/sys_enter_openat")
-int dlp_handle_openat(struct trace_event_raw_sys_enter_openat *ctx)
+int dlp_handle_openat(struct trace_event_raw_sys_enter *ctx)
 {
 	struct dlp_event *e;
 	pid_t pid;
