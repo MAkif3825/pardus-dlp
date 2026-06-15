@@ -22,6 +22,19 @@ struct {
 
 const volatile unsigned long long min_duration_ns = 0;
 
+SEC("tracepoint/syscalls/sys_enter_openat")
+int dlp_handle_openat(struct trace_Event_raw_sys_enter_openat *ctx)
+{
+	// Reserve a space frpm ring buffer
+	e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+	if (!e)
+		return 0;
+
+	return 0;
+}
+
+
+
 SEC("tp/sched/sched_process_exec")
 int handle_exec(struct trace_event_raw_sched_process_exec *ctx)
 {
