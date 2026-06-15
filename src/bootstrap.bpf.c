@@ -45,7 +45,7 @@ int dlp_handle_openat(struct trace_event_raw_sys_enter *ctx)
 
 	// 1. Run the copy function. It returns a number.
 	// 2. If it returns a negative number (< 0), it means the copy FAILED.
-	if (bpf_probe_read_user_str(&e->filename, sizeof(e->filename), ctx->filename) < 0) {
+	if (bpf_probe_read_user_str(&e->filename, sizeof(e->filename), (const char *)ctx->args[1]) < 0) {
 		// 3. Since it failed, we manually force the string to be empty
 		e->filename[0] = '\0'; 
 	}
