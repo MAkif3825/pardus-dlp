@@ -23,12 +23,40 @@ struct {
 const volatile unsigned long long min_duration_ns = 0;
 
 SEC("tracepoint/syscalls/sys_enter_openat")
-int dlp_handle_openat(struct trace_Event_raw_sys_enter_openat *ctx)
+int dlp_handle_openat(struct trace_event_raw_sys_enter_openat *ctx)
 {
-	// Reserve a space frpm ring buffer
+	struct dlp_event *e;
+	pid_t pid;
+	__u32 uid;
+
+	// Reserve a space from ring buffer
 	e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
 	if (!e)
 		return 0;
+
+	// Get PID of process
+	pid = bpf_get_current_pid_tgid() >> 32;
+
+	// Get UID of the process
+	uid = (__u32)bpf_get_current_uid_gid();
+
+	// Get the name of the command
+	bpf_get_current_comm(&e->comm, sizeof(e->comm));
+
+	// 1. Run the copy function. It returns a number.
+	// 2. If it returns a negative number (< 0), it means the copy FAILED.
+	if (bpf_probe_read_user_str(&e->filename, sizeof(e->filename), ctx->filename) < 0) {
+		// 3. Since it failed, we manually force the string to be empty
+		e->filename[0] = '\0'; 
+	}
+
+	// Store the data to the ring buffer
+	e->pid = pid;
+	e->uid = uid;	
+	e->op_type = DLP_OP_OPEN;
+
+	// Successfully submit it to user-space for post-processing
+	bpf_ringbuf_submit(e, 0);
 
 	return 0;
 }
