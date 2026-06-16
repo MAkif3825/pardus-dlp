@@ -63,11 +63,11 @@ make clean && make
 ### 3. Launch the Security Agent
 Execute the compiled binary from the root directory by supplying your designated watchlist pathway via the required `-p` parameter:
 ```bash
-sudo ./bootstrap -p policy.txt
+sudo src/bootstrap -p policy.txt
 ```
 
 ### 4. Directing Output to a JSON Log File (Optional)
 To stream telemetry alerts straight into a persistent JSON tracking log while keeping standard screen visibility, utilize the Unix stream splitter pipeline:
 ```bash
-sudo ./bootstrap -p policy.txt | tee -a dlp_alerts.json
+sudo src/bootstrap -p policy.txt | tee -a dlp_alerts.json
 ```
