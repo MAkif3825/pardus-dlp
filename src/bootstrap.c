@@ -154,15 +154,26 @@ static int handle_event(void *ctx, void *data, size_t data_sz)
     pw = getpwuid(e->uid);
     username = pw ? pw->pw_name : "unknown";
 
-    // Print json
+    // Convert the numeric enum op_type into a readable string
+    const char *op_name = "UNKNOWN";
+    if (e->op_type == DLP_OP_OPEN) {
+        op_name = "OPEN/READ";
+    } else if (e->op_type == DLP_OP_WRITE) {
+        op_name = "WRITE";
+    } else if (e->op_type == DLP_OP_CLOSE) {
+        op_name = "CLOSE";
+    }
+
+// Print comprehensive correlated security telemetry
     printf("{\n");
     printf("  \"timestamp\": \"%s\",\n", ts);  
     printf("  \"process_name\": \"%s\",\n", e->comm);
     printf("  \"pid\": %d,\n", e->pid);
     printf("  \"uid\": %d,\n", e->uid);
     printf("  \"username\": \"%s\",\n", username); 
-    printf("  \"file_path\": \"%s\",\n", e->filename); 
-    printf("  \"action\": \"ALERT\"\n");  
+    printf("  \"file_path\": \"%s\",\n", path_to_check);
+    printf("  \"operation\": \"%s\",\n", op_name); 
+    printf("  \"raw_flags\": \"0x%x\"\n", e->flag);  
     printf("}\n");
 
     return 0;
