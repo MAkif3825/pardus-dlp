@@ -31,6 +31,7 @@ struct dlp_event {
 	char comm[TASK_COMM_LEN];
 	char filename[MAX_FILENAME_LEN];
 	__u32 op_type;
+	__u32 flags;
 };
 
 #endif /* __BOOTSTRAP_H */
