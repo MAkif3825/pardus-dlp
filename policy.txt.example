@@ -1,0 +1,4 @@
+# Example DLP Watchlist Configuration
+# Copy this file to 'policy.txt' and add your local paths
+/etc/passwd
+/etc/shadow
