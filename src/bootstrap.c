@@ -11,7 +11,6 @@
 
 static struct env {
 	bool verbose;
-	long min_duration_ms;
 } env;
 
 const char *argp_program_version = "bootstrap 0.0";
@@ -30,6 +29,13 @@ static const struct argp_option opts[] = {
 	{},
 };
 
+const char *sensitive_paths[] = {
+    "/etc/shadow",
+    "/etc/passwd",
+    "/home/pardus/secret"
+};
+#define MATCH_COUNT (sizeof(sensitive_paths) / sizeof(sensitive_paths[0]))
+
 static error_t parse_arg(int key, char *arg, struct argp_state *state)
 {
 	switch (key) {
@@ -38,11 +44,6 @@ static error_t parse_arg(int key, char *arg, struct argp_state *state)
 		break;
 	case 'd':
 		errno = 0;
-		env.min_duration_ms = strtol(arg, NULL, 10);
-		if (errno || env.min_duration_ms <= 0) {
-			fprintf(stderr, "Invalid duration: %s\n", arg);
-			argp_usage(state);
-		}
 		break;
 	case ARGP_KEY_ARG:
 		argp_usage(state);
@@ -68,34 +69,48 @@ static int libbpf_print_fn(enum libbpf_print_level level, const char *format, va
 
 static volatile bool exiting = false;
 
-static void sig_handler(int sig)
+static void sig_handler(int sig)	
 {
 	exiting = true;
 }
 
 static int handle_event(void *ctx, void *data, size_t data_sz)
 {
-	const struct event *e = data;
-	struct tm *tm;
-	char ts[32];
-	time_t t;
+    // Cast incoming data to custom DLP struct contract
+    const struct dlp_event *e = data;
+	    
+    // Fetch the current system time for the log
+    struct tm *tm;
+    char ts[32];
+    time_t t;
+    time(&t);
+    tm = localtime(&t);
+    strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", tm); 
 
-	time(&t);
-	tm = localtime(&t);
-	strftime(ts, sizeof(ts), "%H:%M:%S", tm);
+	bool is_sensitive = false;
 
-	if (e->exit_event) {
-		printf("%-8s %-5s %-16s %-7d %-7d [%u]",
-		       ts, "EXIT", e->comm, e->pid, e->ppid, e->exit_code);
-		if (e->duration_ns)
-			printf(" (%llums)", e->duration_ns / 1000000);
-		printf("\n");
-	} else {
-		printf("%-8s %-5s %-16s %-7d %-7d %s\n",
-		       ts, "EXEC", e->comm, e->pid, e->ppid, e->filename);
+	for (int i = 0; i < MATCH_COUNT; i++) {
+		if (strstr(e->filename, sensitive_paths[i]) != NULL) {
+			is_sensitive = true;
+			break;
+		}
 	}
 
-	return 0;
+	if (!is_sensitive) {
+		return 0; 
+	}
+
+    printf("{\n");
+    printf("  \"timestamp\": \"%s\",\n", ts);  
+    printf("  \"process_name\": \"%s\",\n", e->comm);
+    printf("  \"pid\": %d,\n", e->pid);
+    printf("  \"uid\": %d,\n", e->uid);
+    printf("  \"file_path\": \"%s\",\n", e->filename);
+    printf("  \"action\": \"ALERT\"\n");  
+    printf("}\n");
+
+
+    return 0;
 }
 
 int main(int argc, char **argv)
@@ -123,9 +138,6 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	/* Parameterize BPF code with minimum duration parameter */
-	skel->rodata->min_duration_ns = env.min_duration_ms * 1000000ULL;
-
 	/* Load & verify BPF programs */
 	err = bootstrap_bpf__load(skel);
 	if (err) {
@@ -149,8 +161,6 @@ int main(int argc, char **argv)
 	}
 
 	/* Process events */
-	printf("%-8s %-5s %-16s %-7s %-7s %s\n",
-	       "TIME", "EVENT", "COMM", "PID", "PPID", "FILENAME/EXIT CODE");
 	while (!exiting) {
 		err = ring_buffer__poll(rb, 100 /* timeout, ms */);
 		/* Ctrl-C will cause -EINTR */
