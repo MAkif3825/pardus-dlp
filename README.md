@@ -1,147 +1,73 @@
-# **libbpf-starter-template**
+# Pardus Mini-DLP (Data Loss Prevention) System
 
-![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
-[![Build and publish](https://github.com/eunomia-bpf/libbpf-starter-template/actions/workflows/publish.yml/badge.svg)](https://github.com/eunomia-bpf/libbpf-starter-template/actions/workflows/publish.yml)
-![GitHub stars](https://img.shields.io/github/stars/eunomia-bpf/libbpf-starter-template?style=social)
+An eBPF-powered, asynchronous security monitoring agent designed to detect unauthorized access to sensitive files on Pardus Linux systems.
 
-Welcome to the **`libbpf-starter-template`**! This project template is designed to help you quickly start
-developing eBPF projects using libbpf in C. The template provides a solid starting point with a Makefile, 
-Dockerfile, and GitHub action, along with all necessary dependencies to simplify your development process.
+---
 
-借助于 GitHub 模板和 Github Codespace，可以轻松构建 eBPF 项目和开发环境，一键在线编译运行 eBPF 程序。关于中文的文档和详细的 eBPF 开发教程，可以参考：https://github.com/eunomia-bpf/bpf-developer-tutorial
+## 🚀 Features
 
-There are other templates for other languages:
+* **Near-Zero Runtime Overhead**: Uses kernel-space eBPF tracepoints (`sys_enter_openat`) to asynchronously capture file access events without blocking host applications.
+* **Dynamic Policy Watchlist**: Ingests monitoring targets dynamically from a user-specified text file at runtime without requiring code recompilation.
+* **Context-Aware Absolute Path Resolution**: Bridges the kernel-to-user space gap by reconstructing relative pathing structures utilizing the `/proc/<pid>/cwd` filesystem alongside native `realpath` verification.
+* **Standard Telemetry Output**: Emits structured JSON alerts correlating system metadata for seamless integration with downstream Security Information and Event Management (SIEM) systems.
 
-- <https://github.com/eunomia-bpf/libbpf-starter-template>: eBPF project template based on the C language and the libbpf framework.
-- <https://github.com/eunomia-bpf/cilium-ebpf-starter-template>: eBPF project template based on the Go language and the cilium/ebpf framework.
-- <https://github.com/eunomia-bpf/libbpf-rs-starter-template>: eBPF project template based on the Rust language and the libbpf-rs framework.
-- <https://github.com/eunomia-bpf/eunomia-template>: eBPF project template based on the C language and the eunomia-bpf framework.
+---
 
-## **Getting Started**
+## 📂 Project Architecture & Directory Layout
 
-To get started, simply click the "Use this template" button on the GitHub repository page. This will create
-a new repository in your account with the same files and structure as this template.
-
-### Use docker
-
-Run the following code to run the eBPF code from the cloud to your local machine in one line:
-
-```console
-$ sudo docker run --rm -it --privileged ghcr.io/eunomia-bpf/libbpf-template:latest
-TIME     EVENT COMM             PID     PPID    FILENAME/EXIT CODE
-09:25:14 EXEC  sh               28142   1788    /bin/sh
-09:25:14 EXEC  playerctl        28142   1788    /nix/store/vf3rsb7j3p7zzyjpb0a3axl8yq4z1sq5-playerctl-2.4.1/bin/playerctl
-09:25:14 EXIT  playerctl        28142   1788    [1] (6ms)
-09:25:15 EXEC  sh               28145   1788    /bin/sh
-09:25:15 EXEC  playerctl        28145   1788    /nix/store/vf3rsb7j3p7zzyjpb0a3axl8yq4z1sq5-playerctl-2.4.1/bin/playerctl
-09:25:15 EXIT  playerctl        28145   1788    [1] (6ms)
+```text
+pardus-dlp/
+├── Makefile               # Optimized compilation & build pipeline for libbpf
+├── policy.txt             # Your local active watchlist targets (git-ignored)
+├── policy.txt.example     # Publicly visible mock watchlist profile template
+└── src/
+    ├── bootstrap.c        # User-space configuration engine, normalizer, & logger
+    ├── bootstrap.bpf.c    # Kernel-space eBPF tracepoint handler probe
+    └── bootstrap.h        # Shared data contract struct layout definitions
 ```
 
-### Use Nix
+---
 
-Using [direnv](https://github.com/direnv/direnv) and nix, you can quickly access a dev shell with a complete development environment.
+## 📋 Monitored Telemetry Data Correlation
+Each generated event completely correlates the following security data vectors:
 
-With direnv, you can automatically load the required dependencies when you enter the directory.
-This way you don't have to worry about installing dependencies to break your other project development environment.
+| Field Metric | Category | Description |
+| :--- | :--- | :--- |
+| `timestamp` | Audit Time | Accurate system logging execution timestamp |
+| `process_name` | Süreç (Process) | The command application performing the read/write execution |
+| `pid` / `uid` | Süreç / Kullanıcı | Process ID and numeric User ID tracking the initiator identity |
+| `file_path` | Dosya Yolu | Completely normalized, absolute destination path targeting files |
+| `action` | İşlem Tipi | System mitigation directive category status label |
 
-See how to install direnv and Nix:
-- direnv: https://github.com/direnv/direnv/blob/master/docs/installation.md
-- Nix: run
-```
-sh <(curl -L https://nixos.org/nix/install) --daemon
-```
+---
 
-Then use the following command to enable direnv support in this directory.
+## 🛠️ Building and Running
 
-```sh
-direnv allow
-```
+### Prerequisites
+Ensure your development environment contains `clang`, `llvm`, `libelf-dev`, and standard `build-essential` packages.
 
-If you want use nix flake without direnv, simply run:
-
-```sh
-nix develop
-```
-
-## **Features**
-
-This starter template includes the following features:
-
-- A **`Makefile`** that allows you to build the project in one command
-- A **`Dockerfile`** to create a containerized environment for your project
-- A **`flake.nix`** to enter a dev shell with needed dependencies
-- A GitHub action to automate your build and publish process
-  and docker image
-- All necessary dependencies for C development with libbpf
-
-## **How to use**
-
-### **1. Create a new repository using this template**
-
-Click the "Use this template" button on the GitHub repository page to create a new repository based on this template.
-
-### **2. Clone your new repository**
-
-Clone your newly created repository to your local machine:
-
-```sh
-git clone https://github.com/your_username/your_new_repository.git --recursive
+### 1. Configure Your Policy Watchlist
+Create a `policy.txt` configuration file within the project root directory and declare your sensitive targets—one per line:
+```text
+/etc/passwd
+/etc/shadow
+/home/pardus/secret
 ```
 
-Or after clone the repo, you can update the git submodule with following commands:
-
-```sh
-git submodule update --init --recursive
+### 2. Compile the Module
+Execute the automation compilation scripts via the main Makefile layout:
+```bash
+make clean && make
 ```
 
-### **3. Install dependencies**
-
-For dependencies, it varies from distribution to distribution. You can refer to shell.nix and dockerfile for installation.
-
-On Ubuntu, you may run `make install` or
-
-```sh
-sudo apt-get install -y --no-install-recommends \
-        libelf1 libelf-dev zlib1g-dev \
-        make clang llvm
+### 3. Launch the Security Agent
+Execute the compiled binary from the root directory by supplying your designated watchlist pathway via the required `-p` parameter:
+```bash
+sudo ./bootstrap -p policy.txt
 ```
 
-to install dependencies.
-
-### **4. Build the project**
-
-To build the project, run the following command:
-
-```sh
-make build
+### 4. Directing Output to a JSON Log File (Optional)
+To stream telemetry alerts straight into a persistent JSON tracking log while keeping standard screen visibility, utilize the Unix stream splitter pipeline:
+```bash
+sudo ./bootstrap -p policy.txt | tee -a dlp_alerts.json
 ```
-
-This will compile your code and create the necessary binaries. You can you the `Github Code space` or `Github Action` to build the project as well.
-
-### ***Run the Project***
-
-You can run the binary with:
-
-```console
-sudo src/bootstrap
-```
-
-Or with Github Packages locally:
-
-```console
-docker run --rm -it --privileged -v $(pwd):/examples ghcr.io/eunomia-bpf/libbpf-template:latest
-```
-
-### **7. GitHub Actions**
-
-This template also includes a GitHub action that will automatically build and publish your project when you push to the repository.
-To customize this action, edit the **`.github/workflows/publish.yml`** file.
-
-## **Contributing**
-
-We welcome contributions to improve this template! If you have any ideas or suggestions,
-feel free to create an issue or submit a pull request.
-
-## **License**
-
-This project is licensed under the MIT License. See the **[LICENSE](LICENSE)** file for more information.
