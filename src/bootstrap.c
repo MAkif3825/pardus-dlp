@@ -110,38 +110,34 @@ static int handle_event(void *ctx, void *data, size_t data_sz)
 {
     const struct dlp_event *e = data;
     char resolved_path[4096];
-    char proc_path[4096]; 
-    const char *path_to_check;
-    // Look up the system username from the numeric UID
     struct passwd *pw; 
     const char *username; 
 
     // Fetch the current system time for the log
     struct tm *tm;
     char ts[32];
-    time_t t;
-    time(&t);
+    time_t t = time(NULL);
     tm = localtime(&t);
     strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", tm); 
 
-    // Choose whether to check raw filename or build /proc bridge
-    const char *target_path = e->filename;
+    // Path resolution. Needed to eliminate the relative paths
+    char proc_path[4096];
+    const char *input_path = e->filename;
+
     if (e->filename[0] != '/') {
         snprintf(proc_path, sizeof(proc_path), "/proc/%d/cwd/%s", e->pid, e->filename);
-        target_path = proc_path;
+        input_path = proc_path; 
     }
 
-    // Convert target_path to a true absolute path using if/else
-    if (realpath(target_path, resolved_path) != NULL) {
-        path_to_check = resolved_path;
-    } else {
-        path_to_check = e->filename;
+    // Single unified validation and symlink-breaking point
+    if (realpath(input_path, resolved_path) == NULL) {
+        strncpy(resolved_path, e->filename, sizeof(resolved_path));
     }
 
-    // Policy Filtering Gate
+    // Check if the path is in the filter list
     bool is_sensitive = false;
     for (int i = 0; i < match_count; i++) {
-        if (strstr(path_to_check, sensitive_paths[i]) != NULL) {
+        if (strstr(resolved_path, sensitive_paths[i]) != NULL) {
             is_sensitive = true;
             break;
         }
@@ -151,29 +147,25 @@ static int handle_event(void *ctx, void *data, size_t data_sz)
         return 0; 
     }
 
+    // Get the username from uid
     pw = getpwuid(e->uid);
     username = pw ? pw->pw_name : "unknown";
 
-    // Convert the numeric enum op_type into a readable string
     const char *op_name = "UNKNOWN";
-    if (e->op_type == DLP_OP_OPEN) {
-        op_name = "OPEN/READ";
-    } else if (e->op_type == DLP_OP_WRITE) {
-        op_name = "WRITE";
-    } else if (e->op_type == DLP_OP_CLOSE) {
-        op_name = "CLOSE";
-    }
+    if (e->op_type == DLP_OP_OPEN)      op_name = "OPEN/READ";
+    else if (e->op_type == DLP_OP_WRITE) op_name = "WRITE";
+    else if (e->op_type == DLP_OP_CLOSE) op_name = "CLOSE";
 
-// Print comprehensive correlated security telemetry
+    // 4. Print Telemetry
     printf("{\n");
     printf("  \"timestamp\": \"%s\",\n", ts);  
     printf("  \"process_name\": \"%s\",\n", e->comm);
     printf("  \"pid\": %d,\n", e->pid);
     printf("  \"uid\": %d,\n", e->uid);
     printf("  \"username\": \"%s\",\n", username); 
-    printf("  \"file_path\": \"%s\",\n", path_to_check);
+    printf("  \"file_path\": \"%s\",\n", resolved_path);
     printf("  \"operation\": \"%s\",\n", op_name); 
-    printf("  \"raw_flags\": \"0x%x\"\n", e->flag);  
+    printf("  \"raw_flags\": \"0x%x\"\n", e->flag); 
     printf("}\n");
 
     return 0;
