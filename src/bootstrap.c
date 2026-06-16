@@ -6,6 +6,8 @@
 #include <time.h>
 #include <sys/resource.h>
 #include <bpf/libbpf.h>
+#include <pwd.h>
+#include <unistd.h>
 #include "bootstrap.h"
 #include "bootstrap.skel.h"
 
@@ -110,6 +112,9 @@ static int handle_event(void *ctx, void *data, size_t data_sz)
     char resolved_path[4096];
     char proc_path[4096]; 
     const char *path_to_check;
+    // Look up the system username from the numeric UID
+    struct passwd *pw; 
+    const char *username; 
 
     // Fetch the current system time for the log
     struct tm *tm;
@@ -146,12 +151,16 @@ static int handle_event(void *ctx, void *data, size_t data_sz)
         return 0; 
     }
 
+    pw = getpwuid(e->uid);
+    username = pw ? pw->pw_name : "unknown";
+
     // Print json
     printf("{\n");
     printf("  \"timestamp\": \"%s\",\n", ts);  
     printf("  \"process_name\": \"%s\",\n", e->comm);
     printf("  \"pid\": %d,\n", e->pid);
     printf("  \"uid\": %d,\n", e->uid);
+    printf("  \"username\": \"%s\",\n", username); 
     printf("  \"file_path\": \"%s\",\n", e->filename); 
     printf("  \"action\": \"ALERT\"\n");  
     printf("}\n");
@@ -200,6 +209,9 @@ int main(int argc, char **argv)
         fprintf(stderr, "Failed to open and load BPF skeleton\n");
         return 1;
     }
+
+    // Tell the kernel probe to ignore our own user-space process ID
+	skel->rodata->my_pid = getpid(); 
 
     /* Load & verify BPF programs */
     err = bootstrap_bpf__load(skel);

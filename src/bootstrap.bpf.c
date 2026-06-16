@@ -21,6 +21,7 @@ struct {
 } rb SEC(".maps");
 
 const volatile unsigned long long min_duration_ns = 0;
+const volatile int my_pid = 0;
 
 SEC("tracepoint/syscalls/sys_enter_openat")
 int dlp_handle_openat(struct trace_event_raw_sys_enter *ctx)
@@ -29,16 +30,21 @@ int dlp_handle_openat(struct trace_event_raw_sys_enter *ctx)
 	pid_t pid;
 	__u32 uid;
 
-	// Reserve a space from ring buffer
-	e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
-	if (!e)
-		return 0;
-
 	// Get PID of process
 	pid = bpf_get_current_pid_tgid() >> 32;
 
+	// If the process opening the file is OUR OWN user-space program, skip it!
+	if (pid == my_pid) {
+		return 0;
+	}
+
 	// Get UID of the process
 	uid = (__u32)bpf_get_current_uid_gid();
+
+	// Reserve a space from ring buffer
+	e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+	if (!e)
+		return 0;	
 
 	// Get the name of the command
 	bpf_get_current_comm(&e->comm, sizeof(e->comm));
