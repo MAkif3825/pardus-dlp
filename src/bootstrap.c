@@ -165,7 +165,7 @@ static int handle_event(void *ctx, void *data, size_t data_sz)
     printf("  \"username\": \"%s\",\n", username); 
     printf("  \"file_path\": \"%s\",\n", resolved_path);
     printf("  \"operation\": \"%s\",\n", op_name); 
-    printf("  \"raw_flags\": \"0x%x\"\n", e->flag); 
+    printf("  \"raw_flags\": \"0x%x\"\n", e->flags);
     printf("}\n");
 
     return 0;
