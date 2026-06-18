@@ -7,8 +7,9 @@
 #include <bpf/libbpf.h>
 
 #include "pardus_dlp.h"
-#include "pardus_dlp.skel.h" // Generated automatically by bpftool/Makefile
-#include "dispatch.h"        // Exposes handle_event
+#include "pardus_dlp.skel.h" 
+#include "dispatch.h"        
+#include "detectors/detector.h" // Fixed: Added missing header for detector_t
 
 static volatile bool exiting = false;
 
@@ -44,7 +45,6 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
     }
     return 0;
 }
-static struct argp_base = { options, parse_opt, 0, doc };
 static struct argp argp = { options, parse_opt, 0, doc };
 
 static void sig_handler(int sig) {
@@ -98,7 +98,6 @@ int main(int argc, char **argv) {
     }
 
     // 5. Setup the Performance/Ring Buffer Boundary
-    // We target "handle_event" directly from dispatch.h
     rb = ring_buffer__new(bpf_map__fd(skel->maps.rb), handle_event, NULL, NULL);
     if (!rb) {
         fprintf(stderr, "[-] Failed to create user-space ring buffer bridge\n");

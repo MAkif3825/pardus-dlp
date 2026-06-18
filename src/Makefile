@@ -16,7 +16,15 @@ VMLINUX := ../vmlinux/$(ARCH)/vmlinux.h
 CFLAGS := -g -Wall
 ALL_LDFLAGS := $(LDFLAGS) $(EXTRA_LDFLAGS)
 
-APPS = bootstrap
+APPS = pardus_dlp
+
+# Dosyalarımız zaten burada olduğu için hedef yolları doğrudan .output altına eşliyoruz
+PARDUS_OBJS := $(OUTPUT)/main.o \
+               $(OUTPUT)/dispatch.o \
+               $(OUTPUT)/event_utils.o \
+               $(OUTPUT)/alert.o \
+               $(OUTPUT)/policy.o \
+               $(OUTPUT)/detectors/policy_detector.o
 
 USE_VENDORED_LIBBPF ?= auto
 USE_VENDORED_BPFTOOL ?= auto
@@ -173,17 +181,22 @@ $(OUTPUT)/%.skel.h: $(OUTPUT)/%.bpf.o | $(OUTPUT) check-bpftool $(BPFTOOL_DEPS)
 	$(call msg,GEN-SKEL,$@)
 	$(Q)$(BPFTOOL) gen skeleton $< > $@
 
-# Build user-space code
-$(patsubst %,$(OUTPUT)/%.o,$(APPS)): %.o: %.skel.h
+# Skeletons dependency mapping
+$(OUTPUT)/main.o: main.c $(OUTPUT)/pardus_dlp.skel.h | $(OUTPUT) check-libbpf
+	$(call msg,CC,$@)
+	$(Q)mkdir -p $(dir $@)
+	$(Q)$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
+# C compilation logic matching files in current location
 $(OUTPUT)/%.o: %.c $(wildcard %.h) | $(OUTPUT) check-libbpf
 	$(call msg,CC,$@)
+	$(Q)mkdir -p $(dir $@)
 	$(Q)$(CC) $(CFLAGS) $(INCLUDES) -c $(filter %.c,$^) -o $@
 
-# Build application binary
-$(APPS): %: $(OUTPUT)/%.o $(LIBBPF_LINK_DEPS) | $(OUTPUT) check-libbpf
+# Final dynamic linker action combining binary assets
+pardus_dlp: $(PARDUS_OBJS) $(LIBBPF_LINK_DEPS) | $(OUTPUT) check-libbpf
 	$(call msg,BINARY,$@)
-	$(Q)$(CC) $(CFLAGS) $^ $(ALL_LDFLAGS) $(LIBBPF_LDLIBS) -o $@
+	$(Q)$(CC) $(CFLAGS) $(PARDUS_OBJS) $(ALL_LDFLAGS) $(LIBBPF_LDLIBS) -o $@
 
 # delete failed targets
 .DELETE_ON_ERROR:
