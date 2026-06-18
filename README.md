@@ -43,15 +43,26 @@ Each generated event completely correlates the following security data vectors:
 
 ## 🛠️ Building and Running
 
-### 1. Clone your new repository
+### 1. Clone the repository
 
-Clone the repository to your local machine:
+There are now two supported build paths:
+
+- use system packages only
+- or use vendored `libbpf` / `bpftool` submodules
+
+Clone normally if you want to rely on system packages:
+
+```sh
+git clone https://github.com/your_username/your_new_repository.git
+```
+
+Clone recursively only if you want the vendored toolchain:
 
 ```sh
 git clone https://github.com/your_username/your_new_repository.git --recursive
 ```
 
-Or after clone the repo, you can update the git submodule with following commands:
+If you already cloned without submodules and later want the vendored copies:
 
 ```sh
 git submodule update --init --recursive
@@ -63,11 +74,21 @@ On Ubuntu, you may run `make install` or
 
 ```sh
 sudo apt-get install -y --no-install-recommends \
-        libelf1 libelf-dev zlib1g-dev \
-        make clang llvm
+        libbpf-dev libelf1 libelf-dev zlib1g-dev \
+        make clang llvm pkg-config
 ```
 
-to install dependencies.
+to install the system-toolchain dependencies.
+
+By default, the build prefers the system `libbpf` and a `bpftool` executable available on `PATH`. If those are unavailable, it falls back to vendored `libbpf/` and `bpftool/` submodules when present.
+
+You can force vendored mode explicitly:
+
+```sh
+make USE_VENDORED_LIBBPF=1 USE_VENDORED_BPFTOOL=1
+```
+
+Note: the package name that provides `bpftool` is distro-specific. On some systems it is not a standalone `bpftool` package.
 
 ### 3. Configure Your Policy Watchlist
 Create a `policy.txt` configuration file within the project root directory and declare your sensitive targets—one per line:
@@ -77,11 +98,18 @@ Create a `policy.txt` configuration file within the project root directory and d
 /home/pardus/secret
 ```
 
-### 4. Compile the Module
-Execute the automation compilation scripts via the main Makefile layout:
+### 4. Compile the module
+
+Execute the build through the top-level Makefile:
+
 ```bash
 make clean && make
 ```
+
+The build now works in either of these modes:
+
+- system mode, preferred by default: `libbpf-dev` is installed and `bpftool` is available on `PATH`
+- vendored mode: `libbpf/` and `bpftool/` submodules are present, or forced with `USE_VENDORED_LIBBPF=1 USE_VENDORED_BPFTOOL=1`
 
 ### 5. Launch the Security Agent
 Execute the compiled binary from the root directory by supplying your designated watchlist pathway via the required `-p` parameter:
