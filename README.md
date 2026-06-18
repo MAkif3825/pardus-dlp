@@ -43,10 +43,33 @@ Each generated event completely correlates the following security data vectors:
 
 ## 🛠️ Building and Running
 
-### Prerequisites
-Ensure your development environment contains `clang`, `llvm`, `libelf-dev`, and standard `build-essential` packages.
+### 1. Clone your new repository
 
-### 1. Configure Your Policy Watchlist
+Clone the repository to your local machine:
+
+```sh
+git clone https://github.com/your_username/your_new_repository.git --recursive
+```
+
+Or after clone the repo, you can update the git submodule with following commands:
+
+```sh
+git submodule update --init --recursive
+```
+
+### 2. Install dependencies
+
+On Ubuntu, you may run `make install` or
+
+```sh
+sudo apt-get install -y --no-install-recommends \
+        libelf1 libelf-dev zlib1g-dev \
+        make clang llvm
+```
+
+to install dependencies.
+
+### 3. Configure Your Policy Watchlist
 Create a `policy.txt` configuration file within the project root directory and declare your sensitive targets—one per line:
 ```text
 /etc/passwd
@@ -54,19 +77,19 @@ Create a `policy.txt` configuration file within the project root directory and d
 /home/pardus/secret
 ```
 
-### 2. Compile the Module
+### 4. Compile the Module
 Execute the automation compilation scripts via the main Makefile layout:
 ```bash
 make clean && make
 ```
 
-### 3. Launch the Security Agent
+### 5. Launch the Security Agent
 Execute the compiled binary from the root directory by supplying your designated watchlist pathway via the required `-p` parameter:
 ```bash
 sudo src/bootstrap -p policy.txt
 ```
 
-### 4. Directing Output to a JSON Log File (Optional)
+### Directing Output to a JSON Log File (Optional)
 To stream telemetry alerts straight into a persistent JSON tracking log while keeping standard screen visibility, utilize the Unix stream splitter pipeline:
 ```bash
 sudo src/bootstrap -p policy.txt | tee -a dlp_alerts.json
