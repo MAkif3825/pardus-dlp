@@ -6,22 +6,69 @@ LIBBPF_SRC := $(abspath ../libbpf/src)
 BPFTOOL_SRC := $(abspath ../bpftool/src)
 LIBBPF_OBJ := $(abspath $(OUTPUT)/libbpf.a)
 BPFTOOL_OUTPUT ?= $(abspath $(OUTPUT)/bpftool)
-BPFTOOL ?= $(BPFTOOL_OUTPUT)/bootstrap/bpftool
 ARCH ?= $(shell uname -m | sed 's/x86_64/x86/' \
-			 | sed 's/aarch64/arm64/' \
-			 | sed 's/ppc64le/powerpc/' \
-			 | sed 's/mips.*/mips/' \
-			 | sed 's/arm.*/arm/' \
-			 | sed 's/riscv64/riscv/')
+				 | sed 's/aarch64/arm64/' \
+				 | sed 's/ppc64le/powerpc/' \
+				 | sed 's/mips.*/mips/' \
+				 | sed 's/arm.*/arm/' \
+				 | sed 's/riscv64/riscv/')
 VMLINUX := ../vmlinux/$(ARCH)/vmlinux.h
-# Use our own libbpf API headers and Linux UAPI headers distributed with
-# libbpf to avoid dependency on system-wide headers, which could be missing or
-# outdated
-INCLUDES := -I$(OUTPUT) -I../libbpf/include/uapi -I$(dir $(VMLINUX))
 CFLAGS := -g -Wall
 ALL_LDFLAGS := $(LDFLAGS) $(EXTRA_LDFLAGS)
 
 APPS = bootstrap
+
+USE_VENDORED_LIBBPF ?= auto
+USE_VENDORED_BPFTOOL ?= auto
+
+HAVE_VENDORED_LIBBPF := $(if $(wildcard $(LIBBPF_SRC)/Makefile),1,0)
+HAVE_VENDORED_BPFTOOL := $(if $(wildcard $(BPFTOOL_SRC)/Makefile),1,0)
+HAVE_SYSTEM_LIBBPF := $(shell pkg-config --exists libbpf 2>/dev/null && echo 1 || echo 0)
+HAVE_SYSTEM_BPFTOOL := $(shell command -v bpftool >/dev/null 2>&1 && echo 1 || echo 0)
+
+ifeq ($(USE_VENDORED_LIBBPF),1)
+USE_LOCAL_LIBBPF := 1
+else ifeq ($(USE_VENDORED_LIBBPF),0)
+USE_LOCAL_LIBBPF := 0
+else ifeq ($(HAVE_SYSTEM_LIBBPF),1)
+USE_LOCAL_LIBBPF := 0
+else
+USE_LOCAL_LIBBPF := $(HAVE_VENDORED_LIBBPF)
+endif
+
+ifeq ($(USE_VENDORED_BPFTOOL),1)
+USE_LOCAL_BPFTOOL := 1
+else ifeq ($(USE_VENDORED_BPFTOOL),0)
+USE_LOCAL_BPFTOOL := 0
+else ifeq ($(HAVE_SYSTEM_BPFTOOL),1)
+USE_LOCAL_BPFTOOL := 0
+else
+USE_LOCAL_BPFTOOL := $(HAVE_VENDORED_BPFTOOL)
+endif
+
+INCLUDES := -I$(OUTPUT) -I$(dir $(VMLINUX))
+
+ifeq ($(USE_LOCAL_LIBBPF),1)
+INCLUDES += -I../libbpf/include/uapi
+LIBBPF_CFLAGS :=
+LIBBPF_BUILD_DEPS := $(LIBBPF_OBJ)
+LIBBPF_LINK_DEPS := $(LIBBPF_OBJ)
+LIBBPF_LDLIBS := -lelf -lz
+else
+LIBBPF_CFLAGS := $(shell pkg-config --cflags libbpf 2>/dev/null)
+INCLUDES += $(LIBBPF_CFLAGS)
+LIBBPF_BUILD_DEPS :=
+LIBBPF_LINK_DEPS :=
+LIBBPF_LDLIBS := $(shell pkg-config --libs libbpf 2>/dev/null)
+endif
+
+ifeq ($(USE_LOCAL_BPFTOOL),1)
+BPFTOOL ?= $(BPFTOOL_OUTPUT)/bootstrap/bpftool
+BPFTOOL_DEPS := $(BPFTOOL)
+else
+BPFTOOL ?= bpftool
+BPFTOOL_DEPS :=
+endif
 
 # Get Clang's default includes on this system. We'll explicitly add these dirs
 # to the includes list when compiling with `-target bpf` because otherwise some
@@ -63,45 +110,80 @@ clean:
 	$(call msg,CLEAN)
 	$(Q)rm -rf $(OUTPUT) $(APPS)
 
+.PHONY: check-libbpf check-bpftool check-vmlinux
+check-libbpf:
+ifeq ($(USE_LOCAL_LIBBPF),1)
+	@:
+else
+	@pkg-config --exists libbpf || { \
+		echo "Missing libbpf development files. Install libbpf-dev, or initialize the libbpf submodule, or run 'make USE_VENDORED_LIBBPF=1'."; \
+		exit 1; \
+	}
+endif
+
+check-bpftool:
+ifeq ($(USE_LOCAL_BPFTOOL),1)
+	@:
+else
+	@command -v $(BPFTOOL) >/dev/null 2>&1 || { \
+		echo "Missing bpftool. Install it, or initialize the bpftool submodule, or run 'make USE_VENDORED_BPFTOOL=1'."; \
+		exit 1; \
+	}
+endif
+
+check-vmlinux:
+	@test -f $(VMLINUX) || { \
+		echo "Missing $(VMLINUX). This repository only vendors vmlinux.h for x86, arm, arm64, and riscv."; \
+		exit 1; \
+	}
+
 $(OUTPUT) $(OUTPUT)/libbpf $(BPFTOOL_OUTPUT):
 	$(call msg,MKDIR,$@)
 	$(Q)mkdir -p $@
 
 # Build libbpf
+ifeq ($(USE_LOCAL_LIBBPF),1)
 $(LIBBPF_OBJ): $(wildcard $(LIBBPF_SRC)/*.[ch] $(LIBBPF_SRC)/Makefile) | $(OUTPUT)/libbpf
 	$(call msg,LIB,$@)
 	$(Q)$(MAKE) -C $(LIBBPF_SRC) BUILD_STATIC_ONLY=1		      \
 		    OBJDIR=$(dir $@)/libbpf DESTDIR=$(dir $@)		      \
 		    INCLUDEDIR= LIBDIR= UAPIDIR=			      \
 		    install
+endif
 
 # Build bpftool
+ifeq ($(USE_LOCAL_BPFTOOL),1)
 $(BPFTOOL): | $(BPFTOOL_OUTPUT)
 	$(call msg,BPFTOOL,$@)
 	$(Q)$(MAKE) ARCH= CROSS_COMPILE= OUTPUT=$(BPFTOOL_OUTPUT)/ -C $(BPFTOOL_SRC) bootstrap
+endif
 
 # Build BPF code
-$(OUTPUT)/%.bpf.o: %.bpf.c $(LIBBPF_OBJ) $(wildcard %.h) $(VMLINUX) | $(OUTPUT)
+$(OUTPUT)/%.bpf.o: %.bpf.c $(LIBBPF_BUILD_DEPS) $(wildcard %.h) $(VMLINUX) | $(OUTPUT) check-libbpf check-vmlinux
 	$(call msg,BPF,$@)
 	$(Q)$(CLANG) -g -O2 -fno-stack-protector -target bpf -D__TARGET_ARCH_$(ARCH) $(INCLUDES) $(CLANG_BPF_SYS_INCLUDES) -c $(filter %.c,$^) -o $@
-	$(Q)$(LLVM_STRIP) -g $@ # strip useless DWARF info
+	$(Q)if command -v $(LLVM_STRIP) >/dev/null 2>&1; then \
+		$(LLVM_STRIP) -g $@; \
+	else \
+		printf '  %-8s %s\n' "INFO" "$(LLVM_STRIP) not found; skipping BPF DWARF stripping for $@"; \
+	fi
 
 # Generate BPF skeletons
-$(OUTPUT)/%.skel.h: $(OUTPUT)/%.bpf.o | $(OUTPUT) $(BPFTOOL)
+$(OUTPUT)/%.skel.h: $(OUTPUT)/%.bpf.o | $(OUTPUT) check-bpftool $(BPFTOOL_DEPS)
 	$(call msg,GEN-SKEL,$@)
 	$(Q)$(BPFTOOL) gen skeleton $< > $@
 
 # Build user-space code
 $(patsubst %,$(OUTPUT)/%.o,$(APPS)): %.o: %.skel.h
 
-$(OUTPUT)/%.o: %.c $(wildcard %.h) | $(OUTPUT)
+$(OUTPUT)/%.o: %.c $(wildcard %.h) | $(OUTPUT) check-libbpf
 	$(call msg,CC,$@)
 	$(Q)$(CC) $(CFLAGS) $(INCLUDES) -c $(filter %.c,$^) -o $@
 
 # Build application binary
-$(APPS): %: $(OUTPUT)/%.o $(LIBBPF_OBJ) | $(OUTPUT)
+$(APPS): %: $(OUTPUT)/%.o $(LIBBPF_LINK_DEPS) | $(OUTPUT) check-libbpf
 	$(call msg,BINARY,$@)
-	$(Q)$(CC) $(CFLAGS) $^ $(ALL_LDFLAGS) -lelf -lz -o $@
+	$(Q)$(CC) $(CFLAGS) $^ $(ALL_LDFLAGS) $(LIBBPF_LDLIBS) -o $@
 
 # delete failed targets
 .DELETE_ON_ERROR:

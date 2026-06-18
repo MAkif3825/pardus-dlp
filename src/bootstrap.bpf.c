@@ -60,7 +60,7 @@ int dlp_handle_openat(struct trace_event_raw_sys_enter *ctx)
 	e->pid = pid;
 	e->uid = uid;	
 	e->op_type = DLP_OP_OPEN;
-	e->flag = ctx->args[2];
+	e->flags = ctx->args[2];
 
 	// Successfully submit it to user-space for post-processing
 	bpf_ringbuf_submit(e, 0);
@@ -157,4 +157,3 @@ int handle_exit(struct trace_event_raw_sched_process_template* ctx)
 	bpf_ringbuf_submit(e, 0);
 	return 0;
 }
-
