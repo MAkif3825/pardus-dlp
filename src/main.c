@@ -6,10 +6,10 @@
 #include <argp.h>
 #include <bpf/libbpf.h>
 
-#include "pardus_dlp.h"
+#include "kernel/pardus_dlp.h"
 #include "pardus_dlp.skel.h" 
 #include "dispatch.h"        
-#include "detectors/detector.h" // Fixed: Added missing header for detector_t
+#include "detectors/detector.h"
 
 static volatile bool exiting = false;
 
