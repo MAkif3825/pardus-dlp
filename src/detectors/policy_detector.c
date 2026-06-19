@@ -1,5 +1,5 @@
 #include "detector.h"
-#include "../policy.h"
+#include "../core/policy.h"
 #include <string.h>
 #include <stdio.h>
 

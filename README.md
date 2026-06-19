@@ -17,13 +17,26 @@ An eBPF-powered, asynchronous security monitoring agent designed to detect unaut
 
 ```text
 pardus-dlp/
-├── Makefile               # Optimized compilation & build pipeline for libbpf
-├── policy.txt             # Your local active watchlist targets (git-ignored)
-├── policy.txt.example     # Publicly visible mock watchlist profile template
+├── Makefile               # Root Makefile (triggers compilation in src/)
+├── policy.txt             # Active sensitive directory watchlist targets
 └── src/
-    ├── bootstrap.c        # User-space configuration engine, normalizer, & logger
-    ├── bootstrap.bpf.c    # Kernel-space eBPF tracepoint handler probe
-    └── bootstrap.h        # Shared data contract struct layout definitions
+    ├── main.c             # Lifecycle & Initialization
+    ├── dispatch.c/.h      # Central Event Traffic Loop
+    ├── event.h            # Enriched data contract structures
+    ├── Makefile           # Your updated modular build system
+    │
+    ├── kernel/            # KERNEL LAYER: eBPF code handlers
+    │   ├── pardus_dlp.bpf.c
+    │   └── pardus_dlp.h
+    ├── core/              # STATEFUL ENGINES: Policy & Data matchers
+    │   ├── policy.c
+    │   └── policy.h
+    ├── detectors/         # PIPELINE DETECTORS: Static compile-time modules
+    │   ├── detector.h
+    │   └── policy_detector.c
+    └── utils/             # STATELESS UTILITIES: Helper tools
+        ├── event_utils.c/.h
+        └── alert.c/.h
 ```
 
 ---
@@ -114,11 +127,11 @@ The build now works in either of these modes:
 ### 5. Launch the Security Agent
 Execute the compiled binary from the root directory by supplying your designated watchlist pathway via the required `-p` parameter:
 ```bash
-sudo src/bootstrap -p policy.txt
+sudo src/pardus_dlp -p policy.txt
 ```
 
 ### Directing Output to a JSON Log File (Optional)
 To stream telemetry alerts straight into a persistent JSON tracking log while keeping standard screen visibility, utilize the Unix stream splitter pipeline:
 ```bash
-sudo src/bootstrap -p policy.txt | tee -a dlp_alerts.json
+sudo src/pardus_dlp -p policy.txt | tee -a dlp_alerts.json
 ```

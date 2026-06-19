@@ -1,6 +1,6 @@
 #include "dispatch.h"
-#include "event_utils.h"
-#include "alert.h"
+#include "utils/event_utils.h"
+#include "utils/alert.h"
 #include "detectors/detector.h"
 
 // Forward declare the plugin instance defined in policy_detector.c
