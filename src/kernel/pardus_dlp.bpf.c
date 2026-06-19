@@ -15,7 +15,7 @@ const volatile int my_pid = 0;
 SEC("tracepoint/syscalls/sys_enter_openat")
 int dlp_handle_openat(struct trace_event_raw_sys_enter *ctx)
 {
-    pid_t pid = bpf_get_current_pid_tgid() >> 32;
+    pid_t pid = bpf_get_current_pid_tgid() & 0xFFFFFFFF;
     
     // Ignore events originating from our own DLP agent process
     if (pid == my_pid)
