@@ -1,5 +1,5 @@
 #pragma once
-#include "event.h"
+#include "../event.h"
 
 // Translates raw kernel paths into absolute normalized paths.
 // Fills out->resolved_path. Returns 0 on success, -1 on fallback.

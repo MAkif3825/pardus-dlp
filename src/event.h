@@ -1,5 +1,5 @@
 #pragma once
-#include "pardus_dlp.h"   
+#include "kernel/pardus_dlp.h"   
 
 typedef struct {
     char resolved_path[4096];       
