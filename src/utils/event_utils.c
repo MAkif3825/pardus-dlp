@@ -6,7 +6,7 @@
 int enrich_event(const struct dlp_event *raw, enriched_event_t *out) {
     out->raw = raw;
 
-    char proc_path[4096];
+    char proc_path[4096] = {0};
     const char *input_path = raw->filename;
 
     // Relative path bridge assembly via /proc
