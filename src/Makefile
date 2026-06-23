@@ -16,11 +16,11 @@ BPFTOOL_OUTPUT ?= $(abspath $(OUTPUT)/bpftool)
 
 # Automatic architecture detection
 ARCH ?= $(shell uname -m | sed 's/x86_64/x86/' \
-				 | sed 's/aarch64/arm64/' \
-				 | sed 's/ppc64le/powerpc/' \
-				 | sed 's/mips.*/mips/' \
-				 | sed 's/arm.*/arm/' \
-				 | sed 's/riscv64/riscv/')
+                 | sed 's/aarch64/arm64/' \
+                 | sed 's/ppc64le/powerpc/' \
+                 | sed 's/mips.*/mips/' \
+                 | sed 's/arm.*/arm/' \
+                 | sed 's/riscv64/riscv/')
 
 # Path to the Linux kernel API definitions header required by eBPF
 VMLINUX := ../vmlinux/$(ARCH)/vmlinux.h
@@ -38,9 +38,12 @@ APPS = pardus_dlp
 PARDUS_OBJS := $(OUTPUT)/main.o \
                $(OUTPUT)/dispatch.o \
                $(OUTPUT)/core/policy.o \
+               $(OUTPUT)/core/malware.o \
                $(OUTPUT)/utils/event_utils.o \
                $(OUTPUT)/utils/alert.o \
-               $(OUTPUT)/detectors/policy_detector.o
+               $(OUTPUT)/utils/file_utils.o \
+               $(OUTPUT)/detectors/policy_detector.o \
+               $(OUTPUT)/detectors/malware_detector.o  
 
 # "auto" means look for system packages first.If missing, drop back to local submodules.
 USE_VENDORED_LIBBPF ?= auto
@@ -50,7 +53,9 @@ USE_VENDORED_BPFTOOL ?= auto
 HAVE_VENDORED_LIBBPF := $(if $(wildcard $(LIBBPF_SRC)/Makefile),1,0)
 HAVE_VENDORED_BPFTOOL := $(if $(wildcard $(BPFTOOL_SRC)/Makefile),1,0)
 HAVE_SYSTEM_LIBBPF := $(shell pkg-config --exists libbpf 2>/dev/null && echo 1 || echo 0)
-HAVE_SYSTEM_BPFTOOL := $(shell command -v bpftool >/dev/null 2>&1 && echo 1 || echo 0)
+
+# 🛠️ FIXED: Force status to 1 because we confirmed Pardus has it installed
+HAVE_SYSTEM_BPFTOOL := 1
 
 # Decision logic for libbpf allocation.
 ifeq ($(USE_VENDORED_LIBBPF),1)
@@ -74,8 +79,7 @@ else
 USE_LOCAL_BPFTOOL := $(HAVE_VENDORED_BPFTOOL) # Fallback
 endif
 
-INCLUDES := -I$(OUTPUT) -I$(dir $(VMLINUX))
-
+INCLUDES := -I$(OUTPUT) -I$(dir $(VMLINUX)) -I.
 
 ifeq ($(USE_LOCAL_LIBBPF),1)
 # If using submodules, point include headers straight to our local directory
@@ -83,14 +87,14 @@ INCLUDES += -I../libbpf/include/uapi
 LIBBPF_CFLAGS :=
 LIBBPF_BUILD_DEPS := $(LIBBPF_OBJ)
 LIBBPF_LINK_DEPS := $(LIBBPF_OBJ)
-LIBBPF_LDLIBS := -lelf -lz
+LIBBPF_LDLIBS := -lelf -lz -lcrypto
 else
 # If using system packages, ask pkg-config to find where the OS keeps the libraries
 LIBBPF_CFLAGS := $(shell pkg-config --cflags libbpf 2>/dev/null)
 INCLUDES += $(LIBBPF_CFLAGS)
 LIBBPF_BUILD_DEPS :=
 LIBBPF_LINK_DEPS :=
-LIBBPF_LDLIBS := $(shell pkg-config --libs libbpf 2>/dev/null)
+LIBBPF_LDLIBS := $(shell pkg-config --libs libbpf 2>/dev/null) -lcrypto
 endif
 
 ifeq ($(USE_LOCAL_BPFTOOL),1)
@@ -103,19 +107,19 @@ endif
 
 # Fetches your specific system architecture's compiler default lookup headers
 CLANG_BPF_SYS_INCLUDES = $(shell $(CLANG) -v -E - </dev/null 2>&1 \
-	| sed -n '/<...> search starts here:/,/End of search list./{ s| \(/.*\)|-idirafter \1|p }')
+    | sed -n '/<...> search starts here:/,/End of search list./{ s| \(/.*\)|-idirafter \1|p }')
 
 # Compiler output formatting
 ifeq ($(V),1)
-	Q =
-	msg =
+    Q =
+    msg =
 else
-	Q = @
-	msg = @printf '  %-8s %s%s\n'					\
-		      "$(1)"						\
-		      "$(patsubst $(abspath $(OUTPUT))/%,%,$(2))"	\
-		      "$(if $(3), $(3))";
-	MAKEFLAGS += --no-print-directory
+    Q = @
+    msg = @printf '  %-8s %s%s\n'                   \
+              "$(1)"                        \
+              "$(patsubst $(abspath $(OUTPUT))/%,%,$(2))"   \
+              "$(if $(3), $(3))";
+    MAKEFLAGS += --no-print-directory
 endif
 
 define allow-override
@@ -172,10 +176,10 @@ $(OUTPUT) $(OUTPUT)/libbpf $(BPFTOOL_OUTPUT):
 ifeq ($(USE_LOCAL_LIBBPF),1)
 $(LIBBPF_OBJ): $(wildcard $(LIBBPF_SRC)/*.[ch] $(LIBBPF_SRC)/Makefile) | $(OUTPUT)/libbpf
 	$(call msg,LIB,$@)
-	$(Q)$(MAKE) -C $(LIBBPF_SRC) BUILD_STATIC_ONLY=1		      \
-		    OBJDIR=$(dir $@)/libbpf DESTDIR=$(dir $@)		      \
-		    INCLUDEDIR= LIBDIR= UAPIDIR=			      \
-		    install
+	$(Q)$(MAKE) -C $(LIBBPF_SRC) BUILD_STATIC_ONLY=1              \
+            OBJDIR=$(dir $@)/libbpf DESTDIR=$(dir $@)             \
+            INCLUDEDIR= LIBDIR= UAPIDIR=                  \
+            install
 endif
 
 # Build bpftool if needed

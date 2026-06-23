@@ -16,9 +16,11 @@ static volatile bool exiting = false;
 // Simple structure to hold CLI arguments
 static struct env {
     char *policy_path;
+    char *malware_path; 
     bool verbose;
 } env = {
     .policy_path = "policy.txt",
+    .malware_path = "malware_db.txt", 
     .verbose = false
 };
 
@@ -26,8 +28,9 @@ static struct env {
 const char *argp_program_version = "Pardus-DLP v1.0.0";
 static char doc[] = "Pardus-DLP: An enterprise-grade eBPF Endpoint Security Sensor.";
 static struct argp_option options[] = {
-    {"policy", 'p', "FILE", 0, "Path to the sensitive directories policy file", 0},
-    {"verbose", 'v', 0, 0, "Enable verbose debug logs", 0},
+    {"policy",  'p', "FILE", 0, "Path to the sensitive directories policy file", 0},
+    {"malware", 'm', "FILE", 0, "Path to the MalwareBazaar signature text file", 0}, 
+    {"verbose", 'v', 0,      0, "Enable verbose debug logs", 0},
     {0}
 };
 
@@ -37,8 +40,14 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
         case 'p':
             e->policy_path = arg;
             break;
+        case 'm':
+            e->malware_path = arg;
+            break;
         case 'v':
             e->verbose = true;
+            break;
+        case ARGP_KEY_ARG:
+             argp_usage(state);
             break;
         default:
             return ARGP_ERR_UNKNOWN;
@@ -51,13 +60,18 @@ static void sig_handler(int sig) {
     exiting = true;
 }
 
-// Forward declare the plugin instance to initialize it
+// Forward declare the plugin instances to initialize them
 extern detector_t policy_detector;
+extern detector_t malware_detector; 
 
 int main(int argc, char **argv) {
     struct pardus_dlp_bpf *skel = NULL;
     struct ring_buffer *rb = NULL;
-    int err;
+    
+    // Explicit tracking variables initialized for the cleanup block below
+    bool policy_init = false;
+    bool malware_init = false;
+    int err = 0;
 
     // 1. Parse command line configurations
     if (argp_parse(&argp, argc, argv, 0, 0, &env) != 0) {
@@ -72,13 +86,24 @@ int main(int argc, char **argv) {
     printf("[*] Loading policy database: %s\n", env.policy_path);
     if (policy_detector.init(env.policy_path) != 0) {
         fprintf(stderr, "[-] Critical Error: Failed to initialize policy detector plugin\n");
-        return 1;
+        err = 1;
+        goto cleanup;
     }
+    policy_init = true;
+
+    printf("[*] Loading signature registry database: %s\n", env.malware_path); // ◄ ADDED: Loading UI indicator
+    if (malware_detector.init(env.malware_path) != 0) {
+        fprintf(stderr, "[-] Critical Error: Failed to load malware signature registry database\n");
+        err = 1;
+        goto cleanup;
+    }
+    malware_init = true;
 
     // 4. Open and Bootstrap the eBPF Kernel Skeleton
     skel = pardus_dlp_bpf__open();
     if (!skel) {
         fprintf(stderr, "[-] Failed to open eBPF skeleton\n");
+        err = 1;
         goto cleanup;
     }
 
@@ -101,6 +126,7 @@ int main(int argc, char **argv) {
     rb = ring_buffer__new(bpf_map__fd(skel->maps.rb), handle_event, NULL, NULL);
     if (!rb) {
         fprintf(stderr, "[-] Failed to create user-space ring buffer bridge\n");
+        err = 1;
         goto cleanup;
     }
 
@@ -120,14 +146,20 @@ int main(int argc, char **argv) {
 
 cleanup:
     printf("\n[*] Cleaning up and tearing down security layers safely...\n");
-    if (rb) ring_buffer__free(rb);
-    if (skel) pardus_dlp_bpf__destroy(skel);
     
-    // Graceful release of plugin resources
-    if (policy_detector.destroy) {
+    if (rb) {
+        ring_buffer__free(rb);
+    }
+    if (skel) {
+        pardus_dlp_bpf__destroy(skel);
+    }
+    if (malware_init && malware_detector.destroy) {
+        malware_detector.destroy();
+    }
+    if (policy_init && policy_detector.destroy) {
         policy_detector.destroy();
     }
 
     printf("[+] Shutdown complete.\n");
-    return 0;
+    return err < 0 ? 1 : err;
 }
