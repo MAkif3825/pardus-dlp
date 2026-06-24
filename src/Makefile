@@ -37,7 +37,6 @@ PARDUS_OBJS := $(OUTPUT)/main.o \
                $(OUTPUT)/dispatch.o \
                $(OUTPUT)/core/policy.o \
                $(OUTPUT)/core/malware.o \
-               $(OUTPUT)/utils/event_utils.o \
                $(OUTPUT)/utils/alert.o \
                $(OUTPUT)/utils/file_utils.o \
                $(OUTPUT)/detectors/policy_detector.o \

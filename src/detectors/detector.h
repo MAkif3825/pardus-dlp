@@ -1,5 +1,5 @@
 #pragma once
-#include "../event.h"
+#include "kernel/pardus_dlp.h"  
 #include <stddef.h>
 
 typedef enum {
@@ -11,7 +11,7 @@ typedef enum {
 typedef struct {
     const char *name;
     int  (*init)(void *config);
-    detection_result_t (*handle)(const enriched_event_t *e,
+    detection_result_t (*handle)(const struct dlp_event  *e,
                                  char *reason_out,
                                  size_t reason_len);
     void (*destroy)(void);

@@ -22,7 +22,6 @@ pardus-dlp/
 └── src/
     ├── main.c             # Lifecycle & Initialization
     ├── dispatch.c/.h      # Central Event Traffic Loop
-    ├── event.h            # Enriched data contract structures
     ├── Makefile           # Your updated modular build system
     │
     ├── kernel/            # KERNEL LAYER: eBPF code handlers

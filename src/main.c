@@ -91,7 +91,7 @@ int main(int argc, char **argv) {
     }
     policy_init = true;
 
-    printf("[*] Loading signature registry database: %s\n", env.malware_path); // ◄ ADDED: Loading UI indicator
+    printf("[*] Loading signature registry database: %s\n", env.malware_path); 
     if (malware_detector.init(env.malware_path) != 0) {
         fprintf(stderr, "[-] Critical Error: Failed to load malware signature registry database\n");
         err = 1;
