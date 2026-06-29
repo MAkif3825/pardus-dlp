@@ -63,7 +63,7 @@ SEC("lsm/bprm_check_security")
 int BPF_PROG(dlp_bprm_check, struct linux_binprm* bprm)
 {
 	char fname[128];
-	char lookup_key[8] = {0};
+	char lookup_key[8] = { 0 };
 	struct dlp_event* e;
 	const char* filename;
 	__u32* allowed;

@@ -148,7 +148,7 @@ all: $(APPS)
 .PHONY: format
 format:
 	$(call msg,FORMAT,Enforcing Linux Kernel Style...)
-	$(Q)clang-format -i *.c *.h core/*.c core/*.h detectors/*.c detectors/*.h utils/*.c utils/*.h kernel/*.c kernel/*.h 2>/dev/null || true
+	$(Q)find . -type f \( -name "*.c" -o -name "*.h" \) -exec clang-format -style=file -i {} +
 	
 .PHONY: clean
 clean:
