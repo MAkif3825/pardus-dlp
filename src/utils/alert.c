@@ -1,28 +1,33 @@
-#include "alert.h"
 #include <pwd.h>
 #include <stdio.h>
 #include <time.h>
 
-void
-alert_report(const char *detector_name, const struct dlp_event *e,
-	     const char *reason)
+#include "alert.h"
+
+void alert_report(const char* detector_name, const struct dlp_event* e, const char* reason)
 {
-	struct tm *tm;
 	char ts[32];
-	time_t t = time(NULL);
-	tm	 = localtime(&t);
+	struct passwd* pw;
+	struct tm* tm;
+	const char* op_name;
+	const char* username;
+	time_t t;
+	unsigned int access_mode;
+
+	t = time(NULL);
+	tm = localtime(&t);
 	strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", tm);
 
-	struct passwd *pw    = getpwuid(e->uid);
-	const char *username = pw ? pw->pw_name : "unknown";
+	pw = getpwuid(e->uid);
+	username = (pw != NULL) ? pw->pw_name : "unknown";
 
-	// Decode the raw kernel flags natively in user-space
-	const char *op_name = "UNKNOWN";
+	/* Decode the raw kernel flags natively in user-space. */
+	op_name = "UNKNOWN";
 
 	if (e->flags == 0xDEAD) {
 		op_name = "EXECUTE_BLOCK";
 	} else {
-		unsigned int access_mode = e->flags & O_ACCMODE;
+		access_mode = e->flags & O_ACCMODE;
 		if (access_mode == O_WRONLY)
 			op_name = "WRITE";
 		else if (access_mode == O_RDONLY)

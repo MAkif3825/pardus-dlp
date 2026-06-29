@@ -1,70 +1,77 @@
-#include "policy.h"
-#include "../utils/file_utils.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-static char **sensitive_paths = NULL;
-static int match_count	      = 0;
+#include "../utils/file_utils.h"
+#include "policy.h"
 
-int
-policy_load(const char *path)
+static char** sensitive_paths = NULL;
+static int match_count = 0;
+
+int policy_load(const char* path)
 {
-	FILE *f = fopen(path, "r");
-	if (!f)
-		return -1;
-
 	char line[4096];
+	char** tmp;
+	FILE* f;
+
+	f = fopen(path, "r");
+	if (f == NULL)
+		return (-1);
+
 	while (fgets(line, sizeof(line), f)) {
-		// This strips spaces, tabs, \r, and \n all in one safe pass
+		/* This strips spaces, tabs, \r, and \n all in one safe pass.
+		 */
 		trim_whitespace(line);
 
-		// Ignore empty rows or comment lines
+		/* Ignore empty rows or comment lines. */
 		if (strlen(line) == 0 || line[0] == '#')
 			continue;
 
-		char **tmp = realloc(sensitive_paths,
-				     (match_count + 1) * sizeof(char *));
-		if (!tmp) {
+		tmp = realloc(sensitive_paths, (match_count + 1) * sizeof(char*));
+		if (tmp == NULL) {
 			fclose(f);
-			return -1; // Out of memory
+			return (-1); /* Out of memory */
 		}
 		sensitive_paths = tmp;
 
 		sensitive_paths[match_count] = strdup(line);
-		if (!sensitive_paths[match_count]) {
+		if (sensitive_paths[match_count] == NULL) {
 			fclose(f);
-			return -1;
+			return (-1);
 		}
 		match_count++;
 	}
 
 	fclose(f);
-	return 0;
+	return (0);
 }
-bool
-policy_is_sensitive(const char *resolved_path)
-{
-	if (!resolved_path || match_count == 0)
-		return false;
 
-	// Evaluate incoming target against our rules array
-	for (int i = 0; i < match_count; i++)
+bool policy_is_sensitive(const char* resolved_path)
+{
+	int i;
+
+	if (resolved_path == NULL || match_count == 0)
+		return (false);
+
+	/* Evaluate incoming target against our rules array. */
+	for (i = 0; i < match_count; i++)
 		if (strstr(resolved_path, sensitive_paths[i]) != NULL)
-			return true; // Match hit!
-	return false;
+			return (true); /* Match hit! */
+
+	return (false);
 }
 
-void
-policy_free(void)
+void policy_free(void)
 {
-	if (!sensitive_paths)
+	int i;
+
+	if (sensitive_paths == NULL)
 		return;
 
-	for (int i = 0; i < match_count; i++)
+	for (i = 0; i < match_count; i++)
 		free(sensitive_paths[i]);
 	free(sensitive_paths);
 
 	sensitive_paths = NULL;
-	match_count	= 0;
+	match_count = 0;
 }

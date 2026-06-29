@@ -1,25 +1,26 @@
-#include "file_utils.h"
+#include <sys/stat.h>
+
 #include <ctype.h>
 #include <openssl/evp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 
-bool
-file_utils_calculate_sha256(const char *filepath, char *out_sha256,
-			    size_t max_size_bytes)
+#include "file_utils.h"
+
+bool file_utils_calculate_sha256(const char* filepath, char* out_sha256, size_t max_size_bytes)
 {
-	struct stat st;
-	FILE *file;
-	EVP_MD_CTX *md_ctx;
 	unsigned char buffer[4096];
+	struct stat st;
 	unsigned char hash[EVP_MAX_MD_SIZE];
+	EVP_MD_CTX* md_ctx;
+	FILE* file;
 	size_t bytes_read;
 	unsigned int hash_len;
+	unsigned int i;
 	bool success;
 
-	if (!filepath || !out_sha256)
+	if (filepath == NULL || out_sha256 == NULL)
 		return (false);
 
 	if (stat(filepath, &st) != 0)
@@ -32,11 +33,11 @@ file_utils_calculate_sha256(const char *filepath, char *out_sha256,
 		return (false);
 
 	file = fopen(filepath, "rb");
-	if (!file)
+	if (file == NULL)
 		return (false);
 
 	md_ctx = EVP_MD_CTX_new();
-	if (!md_ctx) {
+	if (md_ctx == NULL) {
 		fclose(file);
 		return (false);
 	}
@@ -65,20 +66,18 @@ file_utils_calculate_sha256(const char *filepath, char *out_sha256,
 	if (!success)
 		return (false);
 
-	for (unsigned int i = 0; i < hash_len; i++)
+	for (i = 0; i < hash_len; i++)
 		sprintf(&out_sha256[i * 2], "%02x", hash[i]);
 	out_sha256[64] = '\0';
 
 	return (true);
 }
 
-
-void
-trim_whitespace(char *str)
+void trim_whitespace(char* str)
 {
-	char *end;
+	char* end;
 
-	if (!str)
+	if (str == NULL)
 		return;
 
 	while (isspace((unsigned char)*str))
