@@ -4,11 +4,13 @@
 
 extern detector_t policy_detector;
 extern detector_t malware_detector; 
+extern detector_t extension_detector;  
 
 static detector_t *detectors[] = {
     &policy_detector,
     &malware_detector,            
-    NULL // Null-terminator simplifies loop counting
+    &extension_detector, 
+    NULL 
 };
 
 int handle_event(void *ctx, void *data, size_t data_sz) {

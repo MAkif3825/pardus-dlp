@@ -15,14 +15,18 @@ void alert_report(const char *detector_name, const struct dlp_event *e, const ch
 
     // Decode the raw kernel flags natively in user-space
     const char *op_name = "UNKNOWN";
-    unsigned int access_mode = e->flags & O_ACCMODE;
-
-    if (access_mode == O_WRONLY) {
-        op_name = "WRITE";
-    } else if (access_mode == O_RDONLY) {
-        op_name = "READ";
-    } else if (access_mode == O_RDWR) {
-        op_name = "READ/WRITE";
+    
+    if (e->flags == 0xDEAD) {
+        op_name = "EXECUTE_BLOCK";
+    } else {
+        unsigned int access_mode = e->flags & O_ACCMODE;
+        if (access_mode == O_WRONLY) {
+            op_name = "WRITE";
+        } else if (access_mode == O_RDONLY) {
+            op_name = "READ";
+        } else if (access_mode == O_RDWR) {
+            op_name = "READ/WRITE";
+        }
     }
 
     printf("{\n");

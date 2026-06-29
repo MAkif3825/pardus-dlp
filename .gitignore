@@ -1,4 +1,5 @@
 .direnv
 policy.txt
 malware_db.txt
+extensions.txt
 /build

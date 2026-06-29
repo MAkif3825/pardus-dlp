@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "../utils/file_utils.h" 
 
 static char **sensitive_paths = NULL;
 static int match_count = 0;
@@ -14,8 +15,8 @@ int policy_load(const char *path) {
 
     char line[4096];
     while (fgets(line, sizeof(line), f)) {
-        // Strip trailing newline character safely
-        line[strcspn(line, "\n")] = 0;
+        // This strips spaces, tabs, \r, and \n all in one safe pass
+        trim_whitespace(line);
         
         // Ignore empty rows or comment lines
         if (strlen(line) == 0 || line[0] == '#') {
@@ -40,7 +41,6 @@ int policy_load(const char *path) {
     fclose(f);
     return 0;
 }
-
 bool policy_is_sensitive(const char *resolved_path) {
     if (!resolved_path || match_count == 0) {
         return false;

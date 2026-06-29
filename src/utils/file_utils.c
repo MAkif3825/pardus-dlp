@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <openssl/evp.h>
+#include <ctype.h>
+#include <string.h>
 
 bool file_utils_calculate_sha256(const char *filepath, char *out_sha256, size_t max_size_bytes) {
     if (!filepath || !out_sha256) {
@@ -79,4 +81,26 @@ bool file_utils_calculate_sha256(const char *filepath, char *out_sha256, size_t 
     out_sha256[64] = '\0';
 
     return true;
+}
+
+void trim_whitespace(char *str) {
+    char *end;
+    if (!str) return;
+
+    // 1. Skip leading whitespace by moving the starting pointer forward
+    while (isspace((unsigned char)*str)) {
+        str++;
+    }
+    
+    // If the string was entirely whitespace, we are done
+    if (*str == 0) return;                      
+    
+    // 2. Start from the very end of the string and look backward
+    end = str + strlen(str) - 1;               
+    while (end > str && isspace((unsigned char)*end)) {
+        end--; 
+    }
+    
+    // 3. Drop a clean Null Terminator directly into memory right after the last character
+    *(end + 1) = '\0';            
 }
