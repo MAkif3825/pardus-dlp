@@ -1,7 +1,11 @@
-#pragma once
-#include "kernel/pardus_dlp.h"   
+#ifndef _EVENT_H_
+#define _EVENT_H_
 
-typedef struct {
-    char resolved_path[4096];       
-    const struct dlp_event *raw;   
-} enriched_event_t;
+#include "kernel/pardus_dlp.h"
+
+struct enriched_event {
+	char resolved_path[4096];
+	const struct dlp_event* raw;
+};
+
+#endif /* !_EVENT_H_ */

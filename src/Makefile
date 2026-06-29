@@ -144,6 +144,12 @@ $(call allow-override,LD,$(CROSS_COMPILE)ld)
 .PHONY: all
 all: $(APPS)
 
+# Run this manually via 'make format' right before you git commit!
+.PHONY: format
+format:
+	$(call msg,FORMAT,Enforcing Linux Kernel Style...)
+	$(Q)clang-format -i *.c *.h core/*.c core/*.h detectors/*.c detectors/*.h utils/*.c utils/*.h kernel/*.c kernel/*.h 2>/dev/null || true
+	
 .PHONY: clean
 clean:
 	$(call msg,CLEAN)

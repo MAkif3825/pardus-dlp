@@ -1,11 +1,15 @@
-#pragma once
+#ifndef _CORE_POLICY_H_
+#define _CORE_POLICY_H_
+
 #include <stdbool.h>
 
-// Loads paths from the policy file into internal static memory
-int policy_load(const char *path);
+/* Loads paths from the policy file into internal static memory. */
+int policy_load(const char* path);
 
-// Computes whether a resolved path matches any sensitive rules
-bool policy_is_sensitive(const char *resolved_path);
+/* Computes whether a resolved path matches any sensitive rules. */
+bool policy_is_sensitive(const char* resolved_path);
 
-// Cleans up internal memory arrays upon agent exit
+/* Cleans up internal memory arrays upon agent exit. */
 void policy_free(void);
+
+#endif /* !_CORE_POLICY_H_ */
