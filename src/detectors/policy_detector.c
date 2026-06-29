@@ -8,9 +8,14 @@ static int policy_init(void *config) {
     return policy_load(path); 
 }
 
-static detection_result_t policy_handle(const enriched_event_t *e,
+static detection_result_t policy_handle(const struct dlp_event *e,
                                         char *reason, size_t rlen) {
-    if (policy_is_sensitive(e->resolved_path)) {
+
+    if (!e) {
+        return DETECTION_PASS;
+    }
+    
+    if (policy_is_sensitive(e->full_path)) {
         snprintf(reason, rlen, "Path matches sensitive watchlist rule");
         return DETECTION_ALERT;
     }

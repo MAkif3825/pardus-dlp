@@ -37,11 +37,12 @@ PARDUS_OBJS := $(OUTPUT)/main.o \
                $(OUTPUT)/dispatch.o \
                $(OUTPUT)/core/policy.o \
                $(OUTPUT)/core/malware.o \
-               $(OUTPUT)/utils/event_utils.o \
+               $(OUTPUT)/core/extensions.o \
                $(OUTPUT)/utils/alert.o \
                $(OUTPUT)/utils/file_utils.o \
                $(OUTPUT)/detectors/policy_detector.o \
-               $(OUTPUT)/detectors/malware_detector.o  
+               $(OUTPUT)/detectors/malware_detector.o \
+               $(OUTPUT)/detectors/extension_detector.o
 
 # "auto" means look for system packages first. If missing, drop back to local submodules.
 USE_VENDORED_LIBBPF ?= auto

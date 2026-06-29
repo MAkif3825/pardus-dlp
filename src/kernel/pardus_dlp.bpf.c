@@ -2,6 +2,7 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include "pardus_dlp.h"
+#include <bpf/bpf_core_read.h>
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
@@ -10,13 +11,22 @@ struct {
     __uint(max_entries, 256 * 1024);
 } rb SEC(".maps");
 
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 32);
+    __type(key, char[8]);   
+    __type(value, int);
+} extensions SEC(".maps");
+
 const volatile int my_pid = 0;
 
-SEC("tracepoint/syscalls/sys_enter_openat")
-int dlp_handle_openat(struct trace_event_raw_sys_enter *ctx)
+SEC("lsm/file_open")
+int BPF_PROG(dlp_file_open, struct file *file)
 {
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
     pid_t pid = bpf_get_current_pid_tgid() & 0xFFFFFFFF;
-    
+    long path_len;
+
     // Ignore events originating from our own DLP agent process
     if (pid == my_pid)
         return 0;
@@ -27,18 +37,102 @@ int dlp_handle_openat(struct trace_event_raw_sys_enter *ctx)
         return 0;
 
     e->pid     = pid;
-    e->uid     = (__u32)bpf_get_current_uid_gid();
-    e->op_type = DLP_OP_OPEN;
-    e->flags   = ctx->args[2]; // Fixed: Matches the header mapping perfectly
+    e->uid     = bpf_get_current_uid_gid() & 0xFFFFFFFF;;
+    e->flags   = file->f_flags;
 
     bpf_get_current_comm(&e->comm, sizeof(e->comm));
 
-    // Safely copy string from user-space address space into kernel memory
-    if (bpf_probe_read_user_str(&e->filename, sizeof(e->filename),
-                                 (const char *)ctx->args[1]) < 0) {
-        e->filename[0] = '\0';
+    // Execute the kernel-side path resolution
+    path_len = bpf_d_path(&file->f_path, e->full_path, sizeof(e->full_path));
+    if (path_len < 0) {
+        // The path is invalid or can't be resolved. Release the memory block.
+        bpf_ringbuf_discard(e, 0);
+        return 0;
     }
 
     bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("lsm/bprm_check_security")
+int BPF_PROG(dlp_bprm_check, struct linux_binprm *bprm)
+{
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    pid_t pid = pid_tgid & 0xFFFFFFFF;
+
+    // Ignore events originating from our own DLP agent process
+    if (pid == my_pid)
+        return 0;
+
+    char fname[128];
+    const char *filename = BPF_CORE_READ(bprm, filename); 
+    bpf_probe_read_kernel_str(fname, sizeof(fname), filename);
+
+    int ext_idx = -1;
+    int len = 0;
+
+    // 1. Locate the true length of the string dynamically (Max 128)
+    for (int i = 0; i < 128; i++) {
+        if (fname[i] == '\0') {
+            len = i;
+            break;
+        }
+    }
+
+    // 2. Scan backward from the end of the string to find the last dot safely.
+    // Looking backward up to 16 characters catches extensions while satisfying the verifier.
+    for (int k = 1; k <= 16; k++) {
+        int check_idx = len - k;
+        
+        if (check_idx < 0) 
+            break;
+
+        if (fname[check_idx] == '.') {
+            ext_idx = check_idx + 1;
+            break; // Found the trailing extension delimiter!
+        }
+    }
+
+    // 3. If a dot was found within safe string boundaries, perform the isolated extraction
+    if (ext_idx > 0 && ext_idx < 128) {
+        char lookup_key[8] = {0};
+
+        // Copy up to 7 characters into our isolated lookup key buffer
+        for (int j = 0; j < 7; j++) {
+            int target_idx = ext_idx + j;
+            
+            // Boundary fallback protection to satisfy verifier pointer tracing
+            if (target_idx >= 128) 
+                break;
+
+            char c = fname[target_idx];
+            if (c == '\0') 
+                break;
+
+            lookup_key[j] = c;
+        }
+
+        // 4. Query our hash map using the safely structured key
+        __u32 *allowed = bpf_map_lookup_elem(&extensions, lookup_key);
+        
+        if (allowed != NULL) {
+            // Allocate an event payload inside your lockless ring buffer 'rb'
+            struct dlp_event *e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+            if (e) {
+                e->pid   = pid;
+                e->uid   = bpf_get_current_uid_gid() & 0xFFFFFFFF;
+                e->flags = 0xDEAD; // Custom flag telling userspace it was blocked
+                
+                bpf_get_current_comm(&e->comm, sizeof(e->comm));
+                bpf_probe_read_kernel_str(e->full_path, sizeof(e->full_path), filename);
+                
+                bpf_ringbuf_submit(e, 0);
+            }
+
+            // Drop the hammer inline!
+            return -13; // -EACCES (Permission Denied)
+        }
+    }
+
     return 0;
 }

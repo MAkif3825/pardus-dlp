@@ -1,0 +1,14 @@
+# ==============================================================================
+# Pardus-DLP Forbidden Execution Extension Rules Database
+# ==============================================================================
+# Add file extensions here WITHOUT a leading dot. 
+# Max length per extension is 7 characters.
+
+pdf
+docx
+xlsx
+pptx
+png
+jpg
+sh
+py
