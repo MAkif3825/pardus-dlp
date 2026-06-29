@@ -1,0 +1,18 @@
+BasedOnStyle: GNU
+UseTab: Always
+IndentWidth: 8
+TabWidth: 8
+AlwaysBreakAfterReturnType: AllDefinitions
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterControlStatement: Never
+  BeforeElse: false
+  AfterStruct: false
+RemoveBracesLLVM: true
+SpaceBeforeParens: ControlStatements
+SpaceInEmptyParentheses: false
+MaxEmptyLinesToKeep: 2
+PointerAlignment: Right
+AlignConsecutiveMacros: Consecutive
+AlignConsecutiveAssignments: Consecutive

@@ -3,24 +3,29 @@
 #include <stdlib.h>
 #include <string.h>
 
-int enrich_event(const struct dlp_event *raw, enriched_event_t *out) {
-    out->raw = raw;
+int
+enrich_event(const struct dlp_event *raw, enriched_event_t *out)
+{
+	out->raw = raw;
 
-    char proc_path[4096] = {0};
-    const char *input_path = raw->filename;
+	char proc_path[4096]   = { 0 };
+	const char *input_path = raw->filename;
 
-    // Relative path bridge assembly via /proc
-    if (raw->filename[0] != '/') {
-        snprintf(proc_path, sizeof(proc_path), "/proc/%d/cwd/%s", raw->pid, raw->filename);
-        input_path = proc_path;
-    }
+	// Relative path bridge assembly via /proc
+	if (raw->filename[0] != '/') {
+		snprintf(proc_path, sizeof(proc_path), "/proc/%d/cwd/%s",
+			 raw->pid, raw->filename);
+		input_path = proc_path;
+	}
 
-    // Attempt absolute canonicalization
-    if (realpath(input_path, out->resolved_path) == NULL) {
-        // Fallback: copy raw filename directly so processing can continue safely
-        strncpy(out->resolved_path, raw->filename, sizeof(out->resolved_path));
-        return -1;
-    }
-    
-    return 0;
+	// Attempt absolute canonicalization
+	if (realpath(input_path, out->resolved_path) == NULL) {
+		// Fallback: copy raw filename directly so processing can
+		// continue safely
+		strncpy(out->resolved_path, raw->filename,
+			sizeof(out->resolved_path));
+		return -1;
+	}
+
+	return 0;
 }
