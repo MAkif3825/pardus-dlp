@@ -2,4 +2,5 @@
 policy.txt
 malware_db.txt
 extensions.txt
+access.csv
 /build

@@ -126,7 +126,7 @@ The build now works in either of these modes:
 ### 5. Launch the Security Agent
 Execute the compiled binary from the root directory by supplying your designated watchlist pathway via the required `-p` parameter:
 ```bash
-sudo ./src/pardus_dlp -p policy.txt -e extensions.txt -m malware_db.txt
+sudo ./src/pardus_dlp -a access.csv -e extensions.txt -m malware_db.txt
 ```
 
 ### Directing Output to a JSON Log File (Optional)

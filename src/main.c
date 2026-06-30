@@ -8,6 +8,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "detectors/access_detector.h"
 #include "detectors/detector.h"
 #include "detectors/extension_detector.h"
 #include "dispatch.h"
@@ -21,11 +22,11 @@ static volatile bool exiting = false;
 
 /* Simple structure to hold CLI arguments */
 static struct env {
-	char* policy_path;
+	char* access_path; /* Updated field name */
 	char* malware_path;
 	char* extensions_path;
 	bool verbose;
-} env = { .policy_path = "policy.txt",
+} env = { .access_path = "access.csv", /* Updated default filename */
 	.malware_path = "malware_db.txt",
 	.extensions_path = "extensions.txt",
 	.verbose = false };
@@ -35,11 +36,13 @@ const char* argp_program_version = "Pardus-DLP v1.0.0";
 
 static char doc[] = "Pardus-DLP: An enterprise-grade eBPF Endpoint Security Sensor.";
 
-static struct argp_option options[] = { { "policy", 'p', "FILE", 0,
-					    "Path to the sensitive directories policy file", 0 },
+static struct argp_option options[] = {
+	{ "access", 'a', "FILE", 0, "Path to the dynamic access rules CSV policy file", 0 }, /* Swapped to -a / --access */
 	{ "malware", 'm', "FILE", 0, "Path to the MalwareBazaar signature text file", 0 },
 	{ "extensions", 'e', "FILE", 0, "Path to the blocked extensions configuration file", 0 },
-	{ "verbose", 'v', 0, 0, "Enable verbose debug logs", 0 }, { 0 } };
+	{ "verbose", 'v', 0, 0, "Enable verbose debug logs", 0 },
+	{ 0 }
+};
 
 static error_t parse_opt(int key, char* arg, struct argp_state* state)
 {
@@ -48,8 +51,8 @@ static error_t parse_opt(int key, char* arg, struct argp_state* state)
 	e = state->input;
 
 	switch (key) {
-	case 'p':
-		e->policy_path = arg;
+	case 'a': /* Swapped option key */
+		e->access_path = arg;
 		break;
 	case 'm':
 		e->malware_path = arg;
@@ -75,25 +78,25 @@ static struct argp argp = { options, parse_opt, NULL, doc };
 static void sig_handler(int sig) { exiting = true; }
 
 /* Forward declare all active plugin contracts */
-extern struct detector policy_detector;
+extern struct detector access_detector;
 extern struct detector malware_detector;
 extern struct detector extension_detector;
 
 int main(int argc, char** argv)
 {
 	struct extension_config ext_cfg;
+	struct access_config acc_cfg;
 	struct pardus_dlp_bpf* skel;
 	struct ring_buffer* rb;
 	int err;
 	bool extension_init;
 	bool malware_init;
-	bool policy_init;
+	bool access_init;
 
 	skel = NULL;
 	rb = NULL;
 
-	/* Explicit tracking variables initialized for the cleanup block. */
-	policy_init = false;
+	access_init = false;
 	malware_init = false;
 	extension_init = false;
 	err = 0;
@@ -107,16 +110,6 @@ int main(int argc, char** argv)
 	signal(SIGTERM, sig_handler);
 
 	/* 3. Initialize Standard Independent Plugins */
-	printf("[*] Loading policy database: %s\n", env.policy_path);
-	if (policy_detector.init(env.policy_path) != 0) {
-		fprintf(stderr,
-		    "[-] Critical Error: Failed to initialize "
-		    "policy detector plugin\n");
-		err = 1;
-		goto cleanup;
-	}
-	policy_init = true;
-
 	printf("[*] Loading signature registry database: %s\n", env.malware_path);
 	if (malware_detector.init(env.malware_path) != 0) {
 		fprintf(stderr,
@@ -145,6 +138,23 @@ int main(int argc, char** argv)
 	}
 
 	/* 5. Initialize Kernel-dependent Plugins (Now that maps exist!) */
+	printf("[*] Arming dynamic access matrices: %s\n", env.access_path);
+	acc_cfg.db_path = env.access_path;
+
+	/* Map these directly to the variables declared in your BPF code */
+	acc_cfg.stage1_map = skel->maps.stage1_inode_map;
+	acc_cfg.stage2_map = skel->maps.stage2_policy_map;
+
+	if (access_detector.init(&acc_cfg) != 0) {
+		fprintf(stderr,
+		    "[-] Critical Error: Failed to arm dynamic access "
+		    "policy maps\n");
+		err = 1;
+		goto cleanup;
+	}
+	access_init = true;
+
+	/* Extension engine initialization remains right below this */
 	printf("[*] Arming blocklist extension parameters: %s\n", env.extensions_path);
 	ext_cfg.db_path = env.extensions_path;
 	ext_cfg.ext_map = skel->maps.extensions;
@@ -197,8 +207,8 @@ cleanup:
 		extension_detector.destroy();
 	if (malware_init && malware_detector.destroy != NULL)
 		malware_detector.destroy();
-	if (policy_init && policy_detector.destroy != NULL)
-		policy_detector.destroy();
+	if (access_init && access_detector.destroy != NULL)
+		access_detector.destroy();
 
 	printf("[+] Shutdown complete.\n");
 	return (err < 0 ? 1 : err);

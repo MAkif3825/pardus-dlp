@@ -35,12 +35,12 @@ APPS = pardus_dlp
 # Object array
 PARDUS_OBJS := $(OUTPUT)/main.o \
                $(OUTPUT)/dispatch.o \
-               $(OUTPUT)/core/policy.o \
+               $(OUTPUT)/core/access.o \
                $(OUTPUT)/core/malware.o \
                $(OUTPUT)/core/extensions.o \
                $(OUTPUT)/utils/alert.o \
                $(OUTPUT)/utils/file_utils.o \
-               $(OUTPUT)/detectors/policy_detector.o \
+               $(OUTPUT)/detectors/access_detector.o \
                $(OUTPUT)/detectors/malware_detector.o \
                $(OUTPUT)/detectors/extension_detector.o
 
