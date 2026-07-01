@@ -39,6 +39,41 @@ struct {
 
 const volatile int my_pid = 0;
 
+static __always_inline bool is_access_blocked(unsigned char active_mask, unsigned int flags)
+{
+	/* Total Lockout check */
+	if (active_mask == 0)
+		return true;
+
+	/* Check Read Intent (cat, cp, O_RDONLY) */
+	if (flags == O_RDONLY || flags == O_RDWR) {
+		if (!(active_mask & 4))
+			return true; /* Blocked: Missing Read (4) bit */
+	}
+
+	/* Check Write Intent (echo, modify, O_WRONLY) */
+	if (flags == O_WRONLY || flags == O_RDWR) {
+		if (!(active_mask & 2))
+			return true; /* Blocked: Missing Write (2) bit */
+	}
+
+	return false; /* Passed all checks */
+}
+
+/* Helper to check if Execution (Bit 1) is blocked */
+static __always_inline bool is_exec_blocked(unsigned char active_mask)
+{
+	/* Total Lockout check */
+	if (active_mask == 0)
+		return true;
+
+	/* Check Execute Intent: Does the mask lack the 1 bit? */
+	if (!(active_mask & 1))
+		return true;
+
+	return false;
+}
+
 /* ---------------- FILE ACCESS ENGINE ---------------- */
 
 SEC("lsm/file_open")
@@ -76,56 +111,69 @@ int BPF_PROG(dlp_file_open, struct file* file)
 	uid = uid_gid & 0xFFFFFFFF;
 	gid = uid_gid >> 32;
 
-	/* 3. Stage 2 Lookup: Check UID specific rules first */
+	/* 3. Stage 2 Lookup: Check UID */
 	pkey.dir_inode = dir_inode;
 	pkey.subject_id = uid;
 	pkey.subject_type = SUBJECT_TYPE_UID;
 	rule = bpf_map_lookup_elem(&stage2_policy_map, &pkey);
 
-	/* Fallback: Check GID rules if no specific UID rule exists */
+	/* Fallback 1: Check GID */
 	if (!rule) {
 		pkey.subject_id = gid;
 		pkey.subject_type = SUBJECT_TYPE_GID;
 		rule = bpf_map_lookup_elem(&stage2_policy_map, &pkey);
 	}
 
-	/* 4. Execute the Bitmask Checklist Matrix */
-	if (rule) {
-		/* Evaluate Operation Module (Read vs Write) */
-		if (rule->enabled_modules & MODULE_OP_TYPE) {
-			if (!rule->allow_write) {
-				unsigned int flags = file->f_flags & O_ACCMODE;
-				if (flags == O_WRONLY || flags == O_RDWR)
-					is_blocked = true;
-			}
-		}
+	/* Fallback 2: Check ALL (Global Net) */
+	if (!rule) {
+		pkey.subject_id = 0; /* ID doesn't matter for ALL */
+		pkey.subject_type = SUBJECT_TYPE_ALL;
+		rule = bpf_map_lookup_elem(&stage2_policy_map, &pkey);
+	}
 
-		/* Evaluate Time Boundaries Module */
-		if (!is_blocked && (rule->enabled_modules & MODULE_TIME)) {
+	/* 4. Execute the Polymorphic Policy Matrix */
+	if (rule) {
+		unsigned int flags = file->f_flags & O_ACCMODE;
+
+		switch (rule->rule_type) {
+
+		case RULE_TYPE_PERM:
+			is_blocked = is_access_blocked(rule->payload.perm.perm_mask, flags);
+			break;
+
+		case RULE_TYPE_TIME: {
 			__u64 tai_ns = bpf_ktime_get_tai_ns();
-			/* Convert UTC Epoch Nanoseconds to Hour of the day (0-23) */
 			__u32 current_hour = (tai_ns / 1000000000ULL / 3600ULL) % 24ULL;
 
-			/* Default to true. We only block if a set rule is actively violated. */
-			bool within_window = true;
+			bool within_window = false;
+			__u8 active_mask = rule->payload.time.off_mask;
 
-			/* Only run checks if the hours are actually configured differently */
-			if (rule->start_hour != rule->end_hour) {
-				within_window = false;
-
-				if (rule->start_hour > rule->end_hour) {
-					/* Overnight shifts (e.g., 18:00 to 08:00) */
-					if (current_hour >= rule->start_hour || current_hour < rule->end_hour)
+			if (rule->payload.time.start_hour != rule->payload.time.end_hour) {
+				if (rule->payload.time.start_hour > rule->payload.time.end_hour) {
+					if (current_hour >= rule->payload.time.start_hour || current_hour < rule->payload.time.end_hour)
 						within_window = true;
 				} else {
-					/* Standard shifts (e.g., 09:00 to 17:00) */
-					if (current_hour >= rule->start_hour && current_hour < rule->end_hour)
+					if (current_hour >= rule->payload.time.start_hour && current_hour < rule->payload.time.end_hour)
 						within_window = true;
 				}
 			}
 
-			if (!within_window)
-				is_blocked = true;
+			if (within_window) {
+				active_mask = rule->payload.time.work_mask;
+			}
+
+			/* Evaluate the calculated mask via UAM standard */
+			is_blocked = is_access_blocked(active_mask, flags);
+			break;
+		}
+
+		case RULE_TYPE_APP:
+		case RULE_TYPE_SESSION:
+		case RULE_TYPE_RATE:
+		case RULE_TYPE_EXT:
+		case RULE_TYPE_AUDIT:
+			/* Ready for your extensions tomorrow! */
+			break;
 		}
 	}
 
@@ -154,102 +202,151 @@ int BPF_PROG(dlp_file_open, struct file* file)
 SEC("lsm/bprm_check_security")
 int BPF_PROG(dlp_bprm_check, struct linux_binprm* bprm)
 {
-	char fname[128];
-	char lookup_key[8] = { 0 };
 	struct dlp_event* e;
-	const char* filename;
-	__u32* allowed;
 	__u64 pid_tgid;
 	pid_t pid;
-	int check_idx;
-	int ext_idx;
-	int i;
-	int j;
-	int k;
-	int len;
-	int target_idx;
-	char c;
+	__u32 uid, gid;
 
 	pid_tgid = bpf_get_current_pid_tgid();
 	pid = pid_tgid & 0xFFFFFFFF;
 
-	/* Ignore events originating from our own DLP agent process. */
+	/* Ignore our own agent */
 	if (pid == my_pid)
 		return (0);
 
-	filename = BPF_CORE_READ(bprm, filename);
+	uid = (bpf_get_current_uid_gid() & 0xFFFFFFFF);
+
+	/* =========================================================================
+	 * PHASE 1: GLOBAL EXTENSION BLOCKER (Your existing logic)
+	 * ========================================================================= */
+	char fname[128];
+	char lookup_key[8] = { 0 };
+	const char* filename = BPF_CORE_READ(bprm, filename);
 	bpf_probe_read_kernel_str(fname, sizeof(fname), filename);
 
-	ext_idx = -1;
-	len = 0;
-
-	/* 1. Locate the true length of the string dynamically (Max 128) */
-	for (i = 0; i < 128; i++) {
+	int len = 0, ext_idx = -1;
+	for (int i = 0; i < 128; i++) {
 		if (fname[i] == '\0') {
 			len = i;
 			break;
 		}
 	}
 
-	/*
-	 * 2. Scan backward from the end of the string to find the last dot
-	 * safely. Looking backward up to 16 characters catches extensions
-	 * while satisfying the verifier.
-	 */
-	for (k = 1; k <= 16; k++) {
-		check_idx = len - k;
-
+	for (int k = 1; k <= 16; k++) {
+		int check_idx = len - k;
 		if (check_idx < 0)
 			break;
-
 		if (fname[check_idx] == '.') {
 			ext_idx = check_idx + 1;
-			break; /* Found the trailing extension delimiter! */
+			break;
 		}
 	}
 
-	/*
-	 * 3. If a dot was found within safe string boundaries, perform the
-	 * isolated extraction.
-	 */
 	if (ext_idx > 0 && ext_idx < 128) {
-		/* Copy up to 7 characters into our isolated lookup key buffer.
-		 */
-		for (j = 0; j < 7; j++) {
-			target_idx = ext_idx + j;
-
-			/* Boundary fallback protection to satisfy verifier. */
-			if (target_idx >= 128)
+		for (int j = 0; j < 7; j++) {
+			int target_idx = ext_idx + j;
+			if (target_idx >= 128 || fname[target_idx] == '\0')
 				break;
-
-			c = fname[target_idx];
-			if (c == '\0')
-				break;
-
-			lookup_key[j] = c;
+			lookup_key[j] = fname[target_idx];
 		}
 
-		/* 4. Query our hash map using the safely structured key. */
-		allowed = bpf_map_lookup_elem(&extensions, lookup_key);
-
+		__u32* allowed = bpf_map_lookup_elem(&extensions, lookup_key);
 		if (allowed != NULL) {
-			/* Allocate an event payload inside your ring buffer.
-			 */
 			e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
 			if (e != NULL) {
 				e->pid = pid;
-				e->uid = bpf_get_current_uid_gid() & 0xFFFFFFFF;
-				e->flags = 0xDEAD; /* Blocked flag to userspace */
-
+				e->uid = uid;
+				e->flags = 0xDEAD; /* Extension Block Flag */
 				bpf_get_current_comm(&e->comm, sizeof(e->comm));
-				bpf_probe_read_kernel_str(
-				    e->full_path, sizeof(e->full_path), filename);
-
+				bpf_probe_read_kernel_str(e->full_path, sizeof(e->full_path), filename);
 				bpf_ringbuf_submit(e, 0);
 			}
+			return (-13); /* Drop hammer on extension */
+		}
+	}
 
-			/* Drop the hammer inline! */
-			return (-13); /* -EACCES (Permission Denied) */
+	/* =========================================================================
+	 * PHASE 2: POLYMORPHIC UAM POLICY (Directory-Specific)
+	 * ========================================================================= */
+	struct file* file = BPF_CORE_READ(bprm, file);
+	if (!file)
+		return (0);
+
+	struct inode* parent_inode = BPF_CORE_READ(file, f_path.dentry, d_parent, d_inode);
+	if (!parent_inode)
+		return (0);
+
+	__u64 dir_inode = BPF_CORE_READ(parent_inode, i_ino);
+	__u32* is_monitored = bpf_map_lookup_elem(&stage1_inode_map, &dir_inode);
+
+	/* If directory isn't monitored by access.csv, exit successfully */
+	if (!is_monitored)
+		return (0);
+
+	struct access_policy_key pkey = { 0 };
+	struct access_policy_value* rule;
+
+	/* Stage 2 Lookup: Check UID */
+	pkey.dir_inode = dir_inode;
+	pkey.subject_id = uid;
+	pkey.subject_type = SUBJECT_TYPE_UID;
+	rule = bpf_map_lookup_elem(&stage2_policy_map, &pkey);
+
+	/* Fallback 1: Check GID */
+	if (!rule) {
+		pkey.subject_id = gid;
+		pkey.subject_type = SUBJECT_TYPE_GID;
+		rule = bpf_map_lookup_elem(&stage2_policy_map, &pkey);
+	}
+
+	/* Fallback 2: Check ALL (Global Net) */
+	if (!rule) {
+		pkey.subject_id = 0; /* ID doesn't matter for ALL */
+		pkey.subject_type = SUBJECT_TYPE_ALL;
+		rule = bpf_map_lookup_elem(&stage2_policy_map, &pkey);
+	}
+
+	if (rule) {
+		bool is_blocked = false;
+
+		switch (rule->rule_type) {
+		case RULE_TYPE_PERM:
+			is_blocked = is_exec_blocked(rule->payload.perm.perm_mask);
+			break;
+		case RULE_TYPE_TIME: {
+			unsigned long long tai_ns = bpf_ktime_get_tai_ns();
+			unsigned int current_hour = (tai_ns / 1000000000ULL / 3600ULL) % 24ULL;
+			bool within_window = false;
+			unsigned char active_mask = rule->payload.time.off_mask;
+
+			if (rule->payload.time.start_hour != rule->payload.time.end_hour) {
+				if (rule->payload.time.start_hour > rule->payload.time.end_hour) {
+					if (current_hour >= rule->payload.time.start_hour || current_hour < rule->payload.time.end_hour)
+						within_window = true;
+				} else {
+					if (current_hour >= rule->payload.time.start_hour && current_hour < rule->payload.time.end_hour)
+						within_window = true;
+				}
+			}
+			if (within_window)
+				active_mask = rule->payload.time.work_mask;
+
+			is_blocked = is_exec_blocked(active_mask);
+			break;
+		}
+		}
+
+		if (is_blocked) {
+			e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+			if (e != NULL) {
+				e->pid = pid;
+				e->uid = uid;
+				e->flags = 0xECEE; /* UAM Policy Exec Block Flag */
+				bpf_get_current_comm(&e->comm, sizeof(e->comm));
+				bpf_probe_read_kernel_str(e->full_path, sizeof(e->full_path), filename);
+				bpf_ringbuf_submit(e, 0);
+			}
+			return (-13); /* Drop hammer on policy */
 		}
 	}
 

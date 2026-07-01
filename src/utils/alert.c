@@ -1,3 +1,4 @@
+#include <fcntl.h> /* Required for O_ACCMODE, O_WRONLY, O_RDONLY, etc. */
 #include <pwd.h>
 #include <stdio.h>
 #include <time.h>
@@ -14,19 +15,26 @@ void alert_report(const char* detector_name, const struct dlp_event* e, const ch
 	time_t t;
 	unsigned int access_mode;
 
+	/* 1. Generate Timestamp */
 	t = time(NULL);
 	tm = localtime(&t);
 	strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", tm);
 
+	/* 2. Resolve Username */
 	pw = getpwuid(e->uid);
 	username = (pw != NULL) ? pw->pw_name : "unknown";
 
-	/* Decode the raw kernel flags natively in user-space. */
+	/* 3. Decode the raw kernel flags natively in user-space */
 	op_name = "UNKNOWN";
 
 	if (e->flags == 0xDEAD) {
-		op_name = "EXECUTE_BLOCK";
+		op_name = "EXECUTE (EXTENSION_BLOCK)";
+	} else if (e->flags == 0xECEE) {
+		op_name = "EXECUTE (POLICY_BLOCK)";
+	} else if (e->flags == 0xBADF) {
+		op_name = "FILE_OPEN (POLICY_BLOCK)";
 	} else {
+		/* Not a block flag. Decode normal file modes for audit logs. */
 		access_mode = e->flags & O_ACCMODE;
 		if (access_mode == O_WRONLY)
 			op_name = "WRITE";
@@ -36,6 +44,7 @@ void alert_report(const char* detector_name, const struct dlp_event* e, const ch
 			op_name = "READ/WRITE";
 	}
 
+	/* 4. Generate Structured JSON Output */
 	printf("{\n");
 	printf("  \"timestamp\": \"%s\",\n", ts);
 	printf("  \"detector\": \"%s\",\n", detector_name);

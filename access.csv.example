@@ -1,0 +1,95 @@
+# ====================================================================================================
+# ██████╗  █████╗ ██████╗ ██████╗ ██╗   ██╗███████╗      ██████╗ ██╗     ██████╗ 
+# ██╔══██╗██╔══██╗██╔══██╗██╔══██╗██║   ██║██╔════╝      ██╔══██╗██║     ██╔══██╗
+# ██████╔╝███████║██████╔╝██║  ██║██║   ██║███████╗█████╗██║  ██║██║     ██████╔╝
+# ██╔═══╝ ██╔══██║██╔══██╗██║  ██║██║   ██║╚════██║╚════╝██║  ██║██║     ██╔═══╝ 
+# ██║     ██║  ██║██║  ██║██████╔╝╚██████╔╝███████║      ██████╔╝███████╗██║     
+# ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝ ╚══════╝      ╚═════╝ ╚══════╝╚═╝     
+# ====================================================================================================
+# ENGINE VERSION : 2.0 (Polymorphic Method Engine)
+# BASE ROUTING   : [METHOD], [TYPE], [ID], [ABSOLUTE_PATH]
+#   - TYPE       : 'UID' (User ID) or 'GID' (Group ID)
+# ====================================================================================================
+# UNIVERSAL ACCESS MASK (UAM) MATH:
+# 4 = Read  (cat, cp, O_RDONLY)
+# 2 = Write (echo, modify, O_WRONLY)
+# 1 = Exec  (./script, execve)
+# 
+# Combinations:
+# 7 = Full Access (4+2+1)
+# 6 = Read & Write (4+2)
+# 5 = Read & Exec (4+1)
+# 4 = Read-Only
+# 0 = Total Lockout
+# ====================================================================================================
+# METHOD SIGNATURES:
+# 1. PERM    : [PermMask]
+# 2. TIME    : [StartHour_UTC], [EndHour_UTC], [WorkMask], [OffMask]
+# 3. APP     : [TrustedBinaryComm], [PermMask]
+# 4. SESSION : [Context (LOCAL/REMOTE)], [PermMask]
+# 5. RATE    : [MaxFilesPerMinute]
+# 6. EXT     : [AllowedExtension], [PermMask]
+# 7. IP      : [AllowedSubnet], [PermMask]
+# 8. AUDIT   : [AuditMask] (Logs actions matching the mask, does not block)
+# ====================================================================================================
+
+
+# ====================================================================================================
+# SECTION A: LIVE DEMONSTRATION MATRIX (Active Rules)
+# Make sure your UID is 1000, or update the numbers below!
+# ====================================================================================================
+
+# ----------------------------------------------------------------------------------------------------
+# DEMO 1: The Static Read-Only Vault (Method: PERM)
+# Target: /tmp/secure_zone
+# Intent: Enforce strict Read-Only (4) 24/7. Writing is fundamentally impossible.
+# ----------------------------------------------------------------------------------------------------
+PERM,UID,1000,/tmp/secure_zone,0
+
+
+# ----------------------------------------------------------------------------------------------------
+# DEMO 2: The Active Time Window (Method: TIME)
+# Target: /tmp/time_zone
+# Intent: It is currently ~08:37 UTC. This rule grants Read/Write (6) between 07:00 and 10:00 UTC. 
+# Result: Since you are INSIDE the window right now, writing will SUCCEED.
+# ----------------------------------------------------------------------------------------------------
+TIME,UID,1000,/tmp/time_zone,07,13,0,4
+
+
+# ----------------------------------------------------------------------------------------------------
+# DEMO 3: The Expired Time Window (Method: TIME)
+# Target: /tmp/night_zone
+# Intent: The authorized window was 01:00 to 02:00 UTC. That shift is over.
+# Result: The engine will immediately drop you to the OffMask (0 = Total Lockout). 
+# ----------------------------------------------------------------------------------------------------
+TIME,UID,1000,/tmp/night_zone,01,02,6,0
+
+# METHOD, TYPE, ID, PATH, PERMMASK
+# Mask 6 = Read (4) + Write (2). Missing Execute (1).
+PERM,UID,1000,/tmp/exec_zone,6
+
+# METHOD, TYPE, ID(Dummy), PATH, PERMMASK
+# Mask 0 = Total Lockout for absolutely everyone who enters this directory
+PERM,ALL,0,/tmp/forbidden_zone,0
+
+
+
+# ====================================================================================================
+# SECTION B: FUTURE EXTENSION EXAMPLES (Commented Out)
+# These are perfectly formatted for when you add the C parsers tomorrow.
+# ====================================================================================================
+
+# APP Demo: Allow access to financials ONLY if opened via LibreOffice.
+# APP,UID,1000,/company/financials,soffice.bin,6
+
+# SESSION Demo: Admins (Group 0) can read remote, but write ONLY if locally logged in.
+# SESSION,GID,0,/etc/pki/tls/private,LOCAL,6
+
+# RATE Demo: Lockout user if they open more than 50 files per minute in the client folder.
+# RATE,UID,1000,/company/clients,50
+
+# EXT Demo: Marketing drop folder. Only Photoshop files allowed.
+# EXT,GID,4000,/shares/marketing,.psd,6
+
+# AUDIT Demo: Suspect user activity. Do not block, but silently log all WRITE (2) attempts.
+# AUDIT,UID,1005,/home/pardus/archives,2

@@ -1,0 +1,153 @@
+================================================================================
+                    PARDUS-DLP ENTERPRISE ACCESS ENGINE
+                           Official Documentation
+                              Version: 2.0.0
+================================================================================
+
+1. OVERVIEW
+--------------------------------------------------------------------------------
+Pardus-DLP v2 is a high-performance, eBPF-driven Data Loss Prevention and 
+Zero-Trust access control engine for Linux. It utilizes a Polymorphic Method 
+Architecture, allowing administrators to define context-aware, multi-dimensional 
+security rules (Time, Network, Application, Extension, etc.) using a single, 
+unified CSV configuration file.
+
+The engine executes in kernel-space using eBPF hooks (lsm/file_open and 
+lsm/bprm_check_security) to ensure near-zero overhead and unbreakable 
+enforcement, while a user-space daemon handles dynamic alerts and JSON 
+telemetry reporting.
+
+
+2. THE UNIVERSAL ACCESS MASK (UAM)
+--------------------------------------------------------------------------------
+All directory-specific permission policies evaluate using the UAM standard. 
+This mirrors standard POSIX / chmod logic mathematically.
+
+[Base Values]
+4 = Read    (Allows: cat, cp, O_RDONLY)
+2 = Write   (Allows: echo, modify, O_WRONLY)
+1 = Execute (Allows: ./script, execve)
+
+[Standard Combinations (Addition)]
+7 = Full Access  (4 + 2 + 1)
+6 = Read & Write (4 + 2) - Blocks Execution
+5 = Read & Exec  (4 + 1) - Blocks Writing
+4 = Read-Only
+0 = Total Lockout (Blocks Everything)
+
+
+3. CONFIGURATION FILE (access.csv) FORMAT
+--------------------------------------------------------------------------------
+Every rule in the matrix requires a Base Routing Key, followed by the specific 
+parameters for that rule type.
+
+Base Key Format:  [METHOD], [SUBJECT_TYPE], [SUBJECT_ID], [ABSOLUTE_PATH]
+- SUBJECT_TYPE : 'UID' (User ID) or 'GID' (Group ID) or 'ALL' for user indifferent policy
+- SUBJECT_ID   : The numeric ID of the user or group (e.g., 1000)
+- PATH         : The absolute path to the secured directory
+
+--- The 8 Polymorphic Methods ---
+
+1. PERM (Static Baseline Permission)
+   Format : PERM, TYPE, ID, PATH, [PermMask]
+   Example: PERM,UID,1000,/var/www/html,6
+   Meaning: User 1000 has 24/7 Read/Write access. Execution is blocked.
+
+2. TIME (Shift-Based Permissions)
+   Format : TIME, TYPE, ID, PATH, [StartHour_UTC], [EndHour_UTC], [WorkMask], [OffMask]
+   Example: TIME,GID,2000,/company/financials,08,18,6,4
+   Meaning: Group 2000 gets R/W (6) between 08:00-18:00 UTC, dropping to Read-Only (4) off-hours.
+
+3. APP (Application Whitelisting) [Future Extension]
+   Format : APP, TYPE, ID, PATH, [TrustedBinaryName], [PermMask]
+   Example: APP,UID,1005,/company/payroll,soffice.bin,6
+
+4. SESSION (Environment Context) [Future Extension]
+   Format : SESSION, TYPE, ID, PATH, [LOCAL | REMOTE], [PermMask]
+   Example: SESSION,GID,0,/etc/pki/tls/private,LOCAL,6
+
+5. RATE (Anti-Harvesting / Velocity Limits) [Future Extension]
+   Format : RATE, TYPE, ID, PATH, [MaxFilesPerMinute]
+   Example: RATE,UID,1001,/company/clients,50
+
+6. EXT (Strict Format Enforcement) [Future Extension]
+   Format : EXT, TYPE, ID, PATH, [AllowedExtension], [PermMask]
+   Example: EXT,GID,4000,/shares/marketing,.psd,6
+
+7. IP (Network Geofence) [Future Extension]
+   Format : IP, TYPE, ID, PATH, [AllowedSubnet], [PermMask]
+   Example: IP,UID,1002,/builds/secret,10.0.5.0/24,4
+
+8. AUDIT (The Silent Canary) [Future Extension]
+   Format : AUDIT, TYPE, ID, PATH, [AuditMask]
+   Example: AUDIT,UID,1008,/home/pardus/archives,2
+   Meaning: Do not block access, but trigger an ALERT if Write (2) is attempted.
+
+
+================================================================================
+4. TEST SCENARIOS & VALIDATION GUIDE
+================================================================================
+Follow these steps to validate the core enforcement pipeline locally.
+
+-------------------------------------------------
+STEP 1: Prepare the Sandbox
+-------------------------------------------------
+Open a terminal as a standard user (ensure your UID is 1000 by typing `id -u`).
+
+  mkdir -p /tmp/dlp_vault
+  echo "secret data" > /tmp/dlp_vault/data.txt
+  cp /bin/ls /tmp/dlp_vault/safe_bin
+  cp /bin/ls /tmp/dlp_vault/malware.exe
+  chmod +x /tmp/dlp_vault/safe_bin /tmp/dlp_vault/malware.exe
+
+-------------------------------------------------
+STEP 2: Configure the Matrix
+-------------------------------------------------
+Open your `access.csv` file and input this single rule. We are assigning a 
+mask of 6 (Read/Write allowed, Execute blocked).
+
+  PERM,UID,1000,/tmp/dlp_vault,6
+
+-------------------------------------------------
+STEP 3: Arm the Engine
+-------------------------------------------------
+Compile the eBPF skeleton and launch the daemon in the foreground.
+
+  make clean && make build
+  sudo ./pardus_dlp -a access.csv
+
+-------------------------------------------------
+STEP 4: Run the Validation Matrix
+-------------------------------------------------
+Open a second terminal and execute the following tests to verify all 
+security hooks (Phase 1 Extension, Phase 2 Exec, Phase 2 File I/O).
+
+TEST A: Verify Read Access (UAM Mask 6 allows Read 4)
+  $ cat /tmp/dlp_vault/data.txt
+  Result: PASS. (Outputs "secret data")
+
+TEST B: Verify Write Access (UAM Mask 6 allows Write 2)
+  $ echo "new data" >> /tmp/dlp_vault/data.txt
+  Result: PASS. (File is modified seamlessly)
+
+TEST C: Verify Global Extension Blocker (Phase 1 LSM)
+  $ /tmp/dlp_vault/malware.exe
+  Result: BLOCKED. (bash: Permission denied)
+  Daemon JSON: Prints "EXECUTE (EXTENSION_BLOCK)"
+
+TEST D: Verify UAM Policy Execution Blocker (Phase 2 LSM)
+  $ /tmp/dlp_vault/safe_bin
+  Result: BLOCKED. (bash: Permission denied. Mask 6 lacks Execute 1).
+  Daemon JSON: Prints "EXECUTE (POLICY_BLOCK)"
+
+-------------------------------------------------
+STEP 5: Validate Time-Shifting (Optional)
+-------------------------------------------------
+1. Close the daemon (Ctrl+C).
+2. Change the access.csv rule to a TIME method using an expired window:
+   TIME,UID,1000,/tmp/dlp_vault,01,02,6,0
+3. Restart the daemon.
+4. Try `cat /tmp/dlp_vault/data.txt`
+   Result: BLOCKED. Engine defaults to the OffMask (0 = Total Lockout) 
+   because the current time is outside the 01:00-02:00 UTC window.
+   Daemon JSON: Prints "FILE_OPEN (POLICY_BLOCK)"

@@ -52,14 +52,22 @@ static enum detection_result access_handle(const struct dlp_event* e, char* reas
 	if (e == NULL)
 		return (DETECTION_PASS);
 
-	/* * 0xBADF is the custom sentinel flag the kernel outputs
-	 * when the access matrix blocks an operation.
-	 */
-	if (e->flags == 0xBADF) {
+	/* 1. Catch the UAM Policy Execution Blocker */
+	if (e->flags == 0xECEE) {
 		snprintf(reason, rlen,
-		    "LSM Access Denied [Target Path: %s, User UID: %u, Process: %s]. "
-		    "Operation blocked by dynamic access policy matrix.",
-		    e->full_path, e->uid, e->comm);
+		    "Blocked by UAM Matrix Policy [Path: %s, UID: %u]. "
+		    "Directory lacks Execution (1) permission.",
+		    e->full_path, e->uid);
+
+		return (DETECTION_ALERT);
+	}
+
+	/* 2. Catch the UAM Policy Read/Write Blocker */
+	else if (e->flags == 0xBADF) {
+		snprintf(reason, rlen,
+		    "Blocked by UAM Matrix Policy [Path: %s, UID: %u]. "
+		    "Directory lacks Read (4) or Write (2) permission.",
+		    e->full_path, e->uid);
 
 		return (DETECTION_ALERT);
 	}
