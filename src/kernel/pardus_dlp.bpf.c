@@ -207,6 +207,10 @@ int BPF_PROG(dlp_bprm_check, struct linux_binprm* bprm)
 	pid_t pid;
 	__u32 uid, gid;
 
+	/* State tracking variables for our unified logging zone */
+	__u32 event_flags = 0;
+	int return_val = 0;
+
 	pid_tgid = bpf_get_current_pid_tgid();
 	pid = pid_tgid & 0xFFFFFFFF;
 
@@ -217,19 +221,8 @@ int BPF_PROG(dlp_bprm_check, struct linux_binprm* bprm)
 	uid = (bpf_get_current_uid_gid() & 0xFFFFFFFF);
 	gid = (bpf_get_current_uid_gid() >> 32);
 
-	/* =========================================================================
-	 * OPTIMIZATION: UNIFIED ABSOLUTE PATH RESOLUTION
-	 * ========================================================================= */
-	char full_path[512] = { 0 };
 	const char* filename = BPF_CORE_READ(bprm, filename);
-
-	/* Extract absolute path once using trusted pointers, fallback to relative */
-	long ret = bpf_d_path(&bprm->file->f_path, full_path, sizeof(full_path));
-	if (ret <= 0) {
-		bpf_probe_read_kernel_str(full_path, sizeof(full_path), filename);
-	}
-
-	bpf_printk("DEBUG: bprm_check_security triggered for: %s\n", full_path);
+	bpf_printk("DEBUG: bprm_check_security triggered for raw filename: %s\n", filename);
 
 	/* =========================================================================
 	 * PHASE 1: GLOBAL EXTENSION BLOCKER
@@ -266,16 +259,9 @@ int BPF_PROG(dlp_bprm_check, struct linux_binprm* bprm)
 
 		__u32* allowed = bpf_map_lookup_elem(&extensions, lookup_key);
 		if (allowed != NULL) {
-			e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
-			if (e != NULL) {
-				e->pid = pid;
-				e->uid = uid;
-				e->flags = 0xDEAD; /* Extension Block Flag */
-				bpf_get_current_comm(&e->comm, sizeof(e->comm));
-				bpf_probe_read_kernel_str(e->full_path, sizeof(e->full_path), full_path);
-				bpf_ringbuf_submit(e, 0);
-			}
-			return (-13); /* Drop hammer on extension */
+			event_flags = 0xDEAD; /* Extension Block Flag */
+			return_val = -13; /* -EACCES */
+			goto log_and_exit;
 		}
 	}
 
@@ -293,37 +279,28 @@ int BPF_PROG(dlp_bprm_check, struct linux_binprm* bprm)
 	__u64 dir_inode = BPF_CORE_READ(parent_inode, i_ino);
 	__u32* is_monitored = bpf_map_lookup_elem(&stage1_inode_map, &dir_inode);
 
-	/* If directory isn't monitored by access.csv, drop down to the global audit line */
+	/* If directory isn't monitored by access.csv, drop down to audit log */
 	if (!is_monitored) {
-		e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
-		if (e != NULL) {
-			e->pid = pid;
-			e->uid = uid;
-			e->flags = 0x1111; /* Custom Flag: Standard Execution Audit */
-			bpf_get_current_comm(&e->comm, sizeof(e->comm));
-			bpf_probe_read_kernel_str(e->full_path, sizeof(e->full_path), full_path);
-			bpf_ringbuf_submit(e, 0);
-		}
-		return (0); /* Allow execution to proceed natively */
+		event_flags = 0x1111; /* Standard Execution Audit */
+		return_val = 0; /* Allow native execution */
+		goto log_and_exit;
 	}
 
 	struct access_policy_key pkey = { 0 };
 	struct access_policy_value* rule;
 
-	/* Stage 2 Lookup: Check UID */
+	/* Stage 2 Lookup Matrix */
 	pkey.dir_inode = dir_inode;
 	pkey.subject_id = uid;
 	pkey.subject_type = SUBJECT_TYPE_UID;
 	rule = bpf_map_lookup_elem(&stage2_policy_map, &pkey);
 
-	/* Fallback 1: Check GID */
 	if (!rule) {
 		pkey.subject_id = gid;
 		pkey.subject_type = SUBJECT_TYPE_GID;
 		rule = bpf_map_lookup_elem(&stage2_policy_map, &pkey);
 	}
 
-	/* Fallback 2: Check ALL (Global Net) */
 	if (!rule) {
 		pkey.subject_id = 0;
 		pkey.subject_type = SUBJECT_TYPE_ALL;
@@ -361,18 +338,32 @@ int BPF_PROG(dlp_bprm_check, struct linux_binprm* bprm)
 		}
 
 		if (is_blocked) {
-			e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
-			if (e != NULL) {
-				e->pid = pid;
-				e->uid = uid;
-				e->flags = 0xECEE; /* UAM Policy Exec Block Flag */
-				bpf_get_current_comm(&e->comm, sizeof(e->comm));
-				bpf_probe_read_kernel_str(e->full_path, sizeof(e->full_path), full_path);
-				bpf_ringbuf_submit(e, 0);
-			}
-			return (-13); /* Drop hammer on policy */
+			event_flags = 0xECEE; /* UAM Policy Exec Block Flag */
+			return_val = -13; /* -EACCES */
+			goto log_and_exit;
 		}
 	}
 
+	/* If no security rules matched and directory is monitored, pass quietly */
 	return (0);
+
+	/* =========================================================================
+	 * UNIFIED TELEMETRY & SUBMISSION ZONE
+	 * ========================================================================= */
+log_and_exit:
+	e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+	if (e != NULL) {
+		e->pid = pid;
+		e->uid = uid;
+		e->flags = event_flags;
+		bpf_get_current_comm(&e->comm, sizeof(e->comm));
+
+		/* Extracted EXACTLY once, straight into ring buffer heap memory */
+		if (bpf_d_path(&bprm->file->f_path, e->full_path, sizeof(e->full_path)) <= 0) {
+			bpf_probe_read_kernel_str(e->full_path, sizeof(e->full_path), filename);
+		}
+		bpf_ringbuf_submit(e, 0);
+	}
+
+	return return_val;
 }
