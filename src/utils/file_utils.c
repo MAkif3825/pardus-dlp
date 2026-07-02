@@ -20,17 +20,22 @@ bool file_utils_calculate_sha256(const char* filepath, char* out_sha256, size_t 
 	unsigned int i;
 	bool success;
 
-	if (filepath == NULL || out_sha256 == NULL)
-		return (false);
+	printf("[UTILITY DEBUG] Attempting to hash path: '%s'\n", filepath);
 
-	if (stat(filepath, &st) != 0)
+	if (stat(filepath, &st) != 0) {
+		printf("[UTILITY DEBUG] stat failed for %s\n", filepath);
 		return (false);
+	}
 
-	if (!S_ISREG(st.st_mode))
+	if (!S_ISREG(st.st_mode)) {
+		printf("[UTILITY DEBUG] File is not a regular file\n");
 		return (false);
+	}
 
-	if ((size_t)st.st_size > max_size_bytes)
+	if ((size_t)st.st_size > max_size_bytes) {
+		printf("[UTILITY DEBUG] File too big! Size: %ld, Limit: %ld\n", (long)st.st_size, (long)max_size_bytes);
 		return (false);
+	}
 
 	file = fopen(filepath, "rb");
 	if (file == NULL)

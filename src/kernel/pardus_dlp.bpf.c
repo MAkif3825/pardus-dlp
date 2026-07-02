@@ -215,13 +215,27 @@ int BPF_PROG(dlp_bprm_check, struct linux_binprm* bprm)
 		return (0);
 
 	uid = (bpf_get_current_uid_gid() & 0xFFFFFFFF);
+	gid = (bpf_get_current_uid_gid() >> 32);
 
 	/* =========================================================================
-	 * PHASE 1: GLOBAL EXTENSION BLOCKER (Your existing logic)
+	 * OPTIMIZATION: UNIFIED ABSOLUTE PATH RESOLUTION
+	 * ========================================================================= */
+	char full_path[512] = { 0 };
+	const char* filename = BPF_CORE_READ(bprm, filename);
+
+	/* Extract absolute path once using trusted pointers, fallback to relative */
+	long ret = bpf_d_path(&bprm->file->f_path, full_path, sizeof(full_path));
+	if (ret <= 0) {
+		bpf_probe_read_kernel_str(full_path, sizeof(full_path), filename);
+	}
+
+	bpf_printk("DEBUG: bprm_check_security triggered for: %s\n", full_path);
+
+	/* =========================================================================
+	 * PHASE 1: GLOBAL EXTENSION BLOCKER
 	 * ========================================================================= */
 	char fname[128];
 	char lookup_key[8] = { 0 };
-	const char* filename = BPF_CORE_READ(bprm, filename);
 	bpf_probe_read_kernel_str(fname, sizeof(fname), filename);
 
 	int len = 0, ext_idx = -1;
@@ -258,7 +272,7 @@ int BPF_PROG(dlp_bprm_check, struct linux_binprm* bprm)
 				e->uid = uid;
 				e->flags = 0xDEAD; /* Extension Block Flag */
 				bpf_get_current_comm(&e->comm, sizeof(e->comm));
-				bpf_probe_read_kernel_str(e->full_path, sizeof(e->full_path), filename);
+				bpf_probe_read_kernel_str(e->full_path, sizeof(e->full_path), full_path);
 				bpf_ringbuf_submit(e, 0);
 			}
 			return (-13); /* Drop hammer on extension */
@@ -279,9 +293,19 @@ int BPF_PROG(dlp_bprm_check, struct linux_binprm* bprm)
 	__u64 dir_inode = BPF_CORE_READ(parent_inode, i_ino);
 	__u32* is_monitored = bpf_map_lookup_elem(&stage1_inode_map, &dir_inode);
 
-	/* If directory isn't monitored by access.csv, exit successfully */
-	if (!is_monitored)
-		return (0);
+	/* If directory isn't monitored by access.csv, drop down to the global audit line */
+	if (!is_monitored) {
+		e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+		if (e != NULL) {
+			e->pid = pid;
+			e->uid = uid;
+			e->flags = 0x1111; /* Custom Flag: Standard Execution Audit */
+			bpf_get_current_comm(&e->comm, sizeof(e->comm));
+			bpf_probe_read_kernel_str(e->full_path, sizeof(e->full_path), full_path);
+			bpf_ringbuf_submit(e, 0);
+		}
+		return (0); /* Allow execution to proceed natively */
+	}
 
 	struct access_policy_key pkey = { 0 };
 	struct access_policy_value* rule;
@@ -301,7 +325,7 @@ int BPF_PROG(dlp_bprm_check, struct linux_binprm* bprm)
 
 	/* Fallback 2: Check ALL (Global Net) */
 	if (!rule) {
-		pkey.subject_id = 0; /* ID doesn't matter for ALL */
+		pkey.subject_id = 0;
 		pkey.subject_type = SUBJECT_TYPE_ALL;
 		rule = bpf_map_lookup_elem(&stage2_policy_map, &pkey);
 	}
@@ -343,7 +367,7 @@ int BPF_PROG(dlp_bprm_check, struct linux_binprm* bprm)
 				e->uid = uid;
 				e->flags = 0xECEE; /* UAM Policy Exec Block Flag */
 				bpf_get_current_comm(&e->comm, sizeof(e->comm));
-				bpf_probe_read_kernel_str(e->full_path, sizeof(e->full_path), filename);
+				bpf_probe_read_kernel_str(e->full_path, sizeof(e->full_path), full_path);
 				bpf_ringbuf_submit(e, 0);
 			}
 			return (-13); /* Drop hammer on policy */
